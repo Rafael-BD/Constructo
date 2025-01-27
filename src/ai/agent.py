@@ -1,8 +1,7 @@
 import google.generativeai as genai
 import json
 from datetime import datetime
-from ..core.chat_terminal import ChatTerminal
-from ..core.log_terminal import LogTerminal
+from ..core.terminal import UnifiedTerminal
 from ..core.linux_interaction import LinuxInteraction
 from ..prompts.main_context import SYSTEM_PROMPT
 from .context_manager import ContextManager
@@ -10,8 +9,7 @@ from .context_manager import ContextManager
 class AIAgent:
     def __init__(self, api_key: str):
         self.chat = self._initialize_chat(api_key)
-        self.chat_terminal = ChatTerminal()
-        self.log_terminal = LogTerminal()
+        self.terminal = UnifiedTerminal()
         self.linux = LinuxInteraction()
         self.context_manager = ContextManager()
         
@@ -43,26 +41,41 @@ class AIAgent:
         
     async def process_command(self, user_input: str, require_confirmation=True):
         try:
+            self.terminal.log(f"Processando comando: {user_input}", "INPUT")
+            
             # Preparar mensagem com contexto atual
             context = self.context_manager.get_current_context()
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            message = {
-                "command": user_input,
-                "context": context,
-                "timestamp": current_time
-            }
+            # Formatar mensagem para o modelo
+            prompt = f"""Contexto atual: {context}
+Comando do usuário: {user_input}
+Timestamp: {current_time}
+
+Analise o comando e responda no formato JSON especificado no prompt do sistema."""
             
             # Enviar mensagem e obter resposta
-            response = await self.chat.send_message(json.dumps(message))
-            response_text = response.text
+            response = self.chat.send_message(prompt)
+            response_text = response.text if response else None
+            
+            if response_text is None:
+                raise ValueError("Received empty response from the chat model.")
             
             try:
-                parsed_response = json.loads(response_text)
+                # Tentar encontrar o JSON na resposta
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                if json_start >= 0 and json_end > 0:
+                    json_str = response_text[json_start:json_end]
+                    parsed_response = json.loads(json_str)
+                else:
+                    raise json.JSONDecodeError("No JSON found", response_text, 0)
+                    
             except json.JSONDecodeError:
+                # Fallback para comando simples
                 parsed_response = {
-                    "análise": "Não foi possível analisar a resposta",
-                    "ação": response_text,
+                    "análise": "Processando comando direto",
+                    "ação": user_input,
                     "risco": "médio",
                     "requer_confirmação": True
                 }
@@ -71,29 +84,34 @@ class AIAgent:
             self.context_manager.add_to_context({
                 "timestamp": current_time,
                 "type": "system",
-                "content": parsed_response["análise"]
+                "content": parsed_response.get("análise", "Análise não disponível")
             })
             
             # Verificar necessidade de confirmação
-            if parsed_response["requer_confirmação"] and require_confirmation:
-                confirmation = await self.chat_terminal.request_confirmation(
-                    f"Devo executar a ação '{parsed_response['ação']}'? (Risco: {parsed_response['risco']})"
+            if parsed_response.get("requer_confirmação", True) and require_confirmation:
+                confirmation = await self.terminal.request_confirmation(
+                    f"Devo executar a ação '{parsed_response.get('ação', 'Ação não disponível')}'? (Risco: {parsed_response.get('risco', 'desconhecido')})"
                 )
                 if not confirmation:
                     return "Operação cancelada pelo usuário."
             
             # Executar comando e registrar resultado
-            stdout, stderr = self.linux.run_command(parsed_response["ação"])
+            self.terminal.log(f"Executando comando: {parsed_response.get('ação', '')}", "EXEC")
+            stdout, stderr = self.linux.run_command(parsed_response.get("ação", ""))
             result = stdout if stdout else stderr
             
-            self.log_terminal.add_log(
-                f"Comando executado: {parsed_response['ação']}\nResultado: {result}",
-                "COMMAND"
-            )
+            # Registrar resultado no contexto
+            self.context_manager.add_to_context({
+                "timestamp": current_time,
+                "type": "output",
+                "content": result
+            })
+            
+            self.terminal.log(f"Resultado do comando:\n{result}", "OUTPUT")
             
             return result
             
         except Exception as e:
             error_msg = f"Erro ao processar comando: {str(e)}"
-            self.log_terminal.add_log(error_msg, "ERROR")
+            self.terminal.log(error_msg, "ERROR")
             return error_msg
