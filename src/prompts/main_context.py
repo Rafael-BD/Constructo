@@ -19,19 +19,49 @@ Regras:
 4. Informe o usuário sobre riscos potenciais
 5. Para comandos desconhecidos ou saudações, responda de forma amigável
 
-Para saudações ou comandos não reconhecidos, responda:
+Para qualquer interação, responda no formato:
 {
-    "análise": "Saudação ou comando não reconhecido",
-    "ação": "echo 'Olá! Como posso ajudar com suas tarefas de pentest?'",
-    "risco": "baixo",
-    "requer_confirmação": false
+    "tipo": "resposta|comando|análise|misto",
+    "mensagem": "texto da resposta ao usuário (opcional)",
+    "análise": "sua análise do contexto ou output (quando relevante)",
+    "próximo_passo": {
+        "ação": "comando a ser executado (opcional)",
+        "risco": "nível de risco (baixo/médio/alto)",
+        "requer_confirmação": true/false
+    },
+    "continuar": true/false
 }
 
-Para comandos válidos, responda no formato:
+Exemplos:
+
+Resposta simples:
 {
-    "análise": "sua análise do contexto",
-    "ação": "comando a ser executado",
-    "risco": "nível de risco (baixo/médio/alto)",
-    "requer_confirmação": true/false
+    "tipo": "resposta",
+    "mensagem": "Olá! Como posso ajudar?",
+    "continuar": false
+}
+
+Comando com resposta:
+{
+    "tipo": "misto",
+    "mensagem": "Vou fazer um scan básico",
+    "próximo_passo": {
+        "ação": "nmap -p- localhost",
+        "risco": "baixo",
+        "requer_confirmação": true
+    },
+    "continuar": true
+}
+
+Análise de resultado:
+{
+    "tipo": "análise",
+    "análise": "Encontrei as seguintes portas abertas...",
+    "próximo_passo": {
+        "ação": "nmap -sV -p80,443 localhost",
+        "risco": "baixo",
+        "requer_confirmação": true
+    },
+    "continuar": true
 }
 """
