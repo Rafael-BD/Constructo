@@ -45,18 +45,20 @@ class AIAgent:
             context = self.context_manager.get_current_context()
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Usar 'as live' para encerrar o spinner ao sair do bloco:
-            with self.terminal.start_processing("Processando...") as live:
-                prompt = f"""Contexto atual: {context}
-                Comando do usuário: {user_input}
-                Timestamp: {current_time}
-                
-                Analise a entrada e responda no formato JSON especificado."""
-                response = self.chat.send_message(prompt)
-                response_text = response.text if response else None
+            # Iniciar processamento com spinner
+            self.terminal.start_processing("Processando...")
             
-            # Limpar a linha do spinner após sair do bloco
-            self.terminal.clear_line()
+            prompt = f"""Contexto atual: {context}
+            Comando do usuário: {user_input}
+            Timestamp: {current_time}
+            
+            Analise a entrada e responda no formato JSON especificado."""
+            
+            response = self.chat.send_message(prompt)
+            response_text = response.text if response else None
+            
+            # Parar spinner e limpar
+            self.terminal.stop_processing()
             
             if not response_text:
                 raise ValueError("Received empty response from the chat model.")

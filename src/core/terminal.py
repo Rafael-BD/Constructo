@@ -12,6 +12,7 @@ class UnifiedTerminal:
         self.log_file = log_file
         self.messages = []
         self.spinner = None
+        self.live = None  # Adicionar referência ao Live
         
         # Definir cores para diferentes tipos de logs
         self.log_styles = {
@@ -27,8 +28,22 @@ class UnifiedTerminal:
         
     def start_processing(self, message="Processando..."):
         """Mostra um spinner enquanto processa"""
+        if self.live:
+            self.stop_processing()
+            
         self.spinner = Spinner('dots')
-        return Live(self.spinner, console=self.console)
+        self.live = Live(self.spinner, console=self.console, transient=True)  # transient=True para auto-limpar
+        self.live.start()
+        
+    def stop_processing(self):
+        """Para o spinner e limpa a linha corretamente"""
+        if self.live:
+            self.live.stop()
+            self.live = None
+        if self.spinner:
+            self.spinner = None
+        self.clear_line()
+        self.console.print()  # Nova linha limpa
         
     def log(self, message: str, level: str = "INFO", show_timestamp=True):
         """Log com cores e timestamps opcionais"""
@@ -48,8 +63,15 @@ class UnifiedTerminal:
             self.console.print(f"[{self.log_styles.get(level, 'white')}]{message}[/]")
             
     def clear_line(self):
-        """Limpa a última linha do terminal"""
-        self.console.print("\033[A\033[K", end="")
+        """Limpa a última linha do terminal sem usar códigos ANSI"""
+        print("\r", end="")  # Retorna cursor para início da linha
+        print(" " * self.console.width, end="\r")  # Limpa linha com espaços
+        
+    def stop_spinner(self):
+        """Para o spinner e limpa a linha"""
+        if self.spinner:
+            self.clear_line()
+            self.spinner = None
             
     async def request_confirmation(self, message: str) -> bool:
         """Solicita confirmação do usuário de forma mais limpa"""
@@ -61,9 +83,7 @@ class UnifiedTerminal:
             f.write(json.dumps(entry) + "\n")
             
     def log_agent(self, message: str):
-        """
-        Exibe mensagem do 'Agente' em estilo ciano, sem timestamp.
-        """
+        """Exibe mensagem do 'Agente' em estilo ciano com timestamp"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         entry = {
             "timestamp": timestamp,
@@ -72,4 +92,9 @@ class UnifiedTerminal:
         }
         self.messages.append(entry)
         self._save_to_file(entry)
-        self.console.print(f"[dim]{timestamp}[/dim] [{self.log_styles['AGENT']}][Agente][/] {message}")
+        
+        # Limpa linha anterior e imprime mensagem
+        self.clear_line()
+        self.console.print(
+            f"[dim]{timestamp}[/dim] [{self.log_styles['AGENT']}][Agente][/] {message}"
+        )
