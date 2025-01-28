@@ -6,7 +6,7 @@ from rich.console import Console
 
 async def main():
     config = load_config()
-    agent = AIAgent(config['api_key'])
+    agent = AIAgent(config)  # Pass entire config instead of just api_key
     console = Console()
     
     console.print("[bold green]Chat Terminal Started[/bold green]")

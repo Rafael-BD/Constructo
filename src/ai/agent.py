@@ -1,45 +1,112 @@
 import google.generativeai as genai
+from google.api_core import retry
+import time
 import json
-import re  # (1) to remove ```json blocks
+import re 
 from datetime import datetime
 from ..core.terminal import UnifiedTerminal
 from ..core.linux_interaction import LinuxInteraction
 from ..prompts.main_context import SYSTEM_PROMPT
 from .context_manager import ContextManager
+from .rate_limiter import RateLimiter
 
 class AIAgent:
-    def __init__(self, api_key: str):
-        self.chat = self._initialize_chat(api_key)
+    def __init__(self, config: dict):
+        self.config = config
+        self.chat = self._initialize_chat()
         self.terminal = UnifiedTerminal()
         self.linux = LinuxInteraction()
         self.context_manager = ContextManager()
         
-    def _initialize_chat(self, api_key: str):
-        genai.configure(api_key=api_key)
+        # Initialize rate limiter
+        api_config = config.get('api', {}).get('rate_limit', {})
+        self.rate_limiter = RateLimiter(
+            requests_per_minute=api_config.get('requests_per_minute', 30),
+            delay_between_requests=api_config.get('delay_between_requests', 0.5)
+        )
+        
+        # Retry configuration
+        self.retry_config = config.get('api', {}).get('retry', {})
+        
+        # Risk level weights for comparison
+        self.risk_levels = {
+            "none": 0,
+            "low": 1,
+            "medium": 2,
+            "high": 3
+        }
+        
+    def _initialize_chat(self):
+        genai.configure(api_key=self.config['api_key'])
+        
+        # Get model configuration
+        model_config = self.config.get('model', {})
         
         model = genai.GenerativeModel(
-            'gemini-2.0-flash-exp',
+            model_config.get('name', 'gemini-2.0-flash-exp'),
             generation_config=genai.GenerationConfig(
-                temperature=0.9,
-                top_p=1,
-                top_k=1,
-                max_output_tokens=2048,
+                temperature=model_config.get('temperature', 0.7),
+                top_p=model_config.get('top_p', 0.9),
+                top_k=model_config.get('top_k', 40),
+                max_output_tokens=model_config.get('max_output_tokens', 4096),
             )
         )
         
-        # Start chat with system instructions
         return model.start_chat(history=[
-            {
-                "role": "user",
-                "parts": [SYSTEM_PROMPT]
-            },
-            {
-                "role": "model",
-                "parts": ["System initialized with instructions. Ready to execute commands."]
-            }
+            {"role": "user", "parts": [SYSTEM_PROMPT]},
+            {"role": "model", "parts": ["System initialized with instructions. Ready to execute commands."]}
         ])
         
-    async def process_command(self, user_input: str, require_confirmation=True):
+    def _needs_confirmation(self, risk_level: str) -> bool:
+        """Determine if an action needs user confirmation based on config"""
+        security_config = self.config.get('security', {})
+        
+        # If confirmations are disabled globally
+        if not security_config.get('require_confirmation', True):
+            return False
+            
+        # Get configured risk threshold
+        threshold = security_config.get('risk_threshold', 'medium').lower()
+        
+        # Compare risk levels
+        action_risk = self.risk_levels.get(risk_level.lower(), 0)
+        threshold_risk = self.risk_levels.get(threshold, 2)  # default to medium
+        
+        return action_risk > threshold_risk
+        
+    async def _send_message_with_retry(self, message: str) -> str:
+        """Send message to API with retry logic"""
+        max_attempts = self.retry_config.get('max_attempts', 3)
+        retry_delay = self.retry_config.get('delay_between_retries', 10)
+        
+        for attempt in range(max_attempts):
+            try:
+                # Wait for rate limiting if needed
+                self.rate_limiter.wait_if_needed()
+                
+                # Send message
+                response = self.chat.send_message(message)
+                return response.text if response else None
+                
+            except Exception as e:
+                error_msg = str(e)
+                
+                # Check if it's a rate limit error
+                if "429" in error_msg or "quota" in error_msg.lower():
+                    if attempt < max_attempts - 1:
+                        self.terminal.log(
+                            f"Rate limit reached. Waiting {retry_delay}s before retry {attempt + 1}/{max_attempts}",
+                            "WARNING"
+                        )
+                        time.sleep(retry_delay)
+                        continue
+                        
+                # If it's the last attempt or not a rate limit error, raise
+                raise
+        
+        raise Exception("Maximum retry attempts reached")
+        
+    async def process_command(self, user_input: str):
         try:
             context = self.context_manager.get_current_context()
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -53,14 +120,14 @@ class AIAgent:
             
             Analyze the input and respond in the specified JSON format."""
             
-            response = self.chat.send_message(prompt)
-            response_text = response.text if response else None
-            
-            # Stop spinner and clear
-            self.terminal.stop_processing()
+            # Use retry logic for API calls
+            response_text = await self._send_message_with_retry(prompt)
             
             if not response_text:
                 raise ValueError("Received empty response from the chat model.")
+            
+            # Stop spinner and clear
+            self.terminal.stop_processing()
             
             async def execute_step(parsed_response):
                 response_text = parsed_response.get("message") or parsed_response.get("analysis") or ""
@@ -70,10 +137,14 @@ class AIAgent:
                     self.terminal.log_agent(response_text)
 
                 if "next_step" in parsed_response and parsed_response["next_step"].get("action"):
-                    if parsed_response["next_step"].get("requires_confirmation", True) and require_confirmation:
+                    action = parsed_response["next_step"]
+                    risk = action.get("risk", "medium").lower()
+                    
+                    # Check if confirmation is needed based on config
+                    if action.get("requires_confirmation", True) and self._needs_confirmation(risk):
                         confirmation = await self.terminal.request_confirmation(
-                            f"Should I execute the action '{parsed_response['next_step']['action']}'? "
-                            f"(Risk: {parsed_response['next_step']['risk']})"
+                            f"Should I execute the action '{action['action']}'? "
+                            f"(Risk: {risk})"
                         )
                         if not confirmation:
                             return "Operation canceled by user.", False
@@ -105,11 +176,11 @@ class AIAgent:
 
                         if parsed_response.get("continue", False):
                             self.terminal.log("Analyzing result...", "INFO")
-                            next_response = self.chat.send_message(
+                            next_response_text = await self._send_message_with_retry(
                                 f"Analyze this result and decide the next step:\n{combined_result}"
                             )
-                            if next_response and next_response.text:
-                                clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", next_response.text)
+                            if next_response_text:
+                                clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", next_response_text)
                                 try:
                                     next_parsed = json.loads(_extract_json(clean_text))
                                     return await execute_step(next_parsed)
