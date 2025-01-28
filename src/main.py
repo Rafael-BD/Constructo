@@ -16,11 +16,7 @@ async def main():
             if user_input.lower() == "exit":
                 break
 
-            # Chamamos o agente, mas não imprimimos a resposta aqui
             response = await agent.process_command(user_input)
-            # Caso deseje, poderia exibir apenas erros ou msgs específicas:
-            # if response and "Erro:" in response:
-            #     console.print(response)
             
         except KeyboardInterrupt:
             print("\nEncerrando programa...")

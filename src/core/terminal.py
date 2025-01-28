@@ -12,9 +12,8 @@ class UnifiedTerminal:
         self.log_file = log_file
         self.messages = []
         self.spinner = None
-        self.live = None  # Adicionar referência ao Live
+        self.live = None 
         
-        # Definir cores para diferentes tipos de logs
         self.log_styles = {
             "INPUT": "bold cyan",
             "EXEC": "bold yellow",

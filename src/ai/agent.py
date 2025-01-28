@@ -17,7 +17,6 @@ class AIAgent:
     def _initialize_chat(self, api_key: str):
         genai.configure(api_key=api_key)
         
-        # Configurar o modelo com os parâmetros de geração
         model = genai.GenerativeModel(
             'gemini-2.0-flash-exp',
             generation_config=genai.GenerationConfig(
@@ -85,11 +84,10 @@ class AIAgent:
                     # Unificar stdout e stderr para o agente receber todo o log
                     combined_result = ""
                     if stdout.strip():
-                        combined_result += stdout.rstrip()  # remover newline extra
+                        combined_result += stdout.rstrip()
                     if stderr.strip():
                         combined_result += f"\n{stderr.strip()}"
 
-                    # Se houve código de erro e stderr
                     if returncode != 0 and stderr.strip():
                         self.terminal.log(
                             f"Comando retornou código {returncode}: {stderr.strip()}",

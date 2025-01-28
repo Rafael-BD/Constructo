@@ -9,8 +9,11 @@ Comandos comuns de pentest:
 - nmap: Scanner de rede
 - nikto: Scanner de vulnerabilidades web
 - dirb/gobuster: Enumeração de diretórios
-- metasploit: Framework de exploração
 - hydra: Ferramenta de bruteforce
+
+Nota sobre comandos interativos:
+Atualmente, comandos interativos como msfconsole e sqlmap não são suportados.
+Por favor, não tente usar esses programas, pois o agente não conseguirá interagir com eles.
 
 Regras:
 1. Sempre analise os outputs antes de prosseguir
