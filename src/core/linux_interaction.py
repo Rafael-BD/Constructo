@@ -1,36 +1,25 @@
 import subprocess
 import signal
 import os
+import shlex 
 
 class LinuxInteraction:
-    # List of commands that can return non-zero codes without being an error
-    KNOWN_NON_ERROR_CODES = {
-        'nikto': [1],
-        'hydra': [0, 1, 255], 
-        'gobuster': [0, 1], 
-        'dirb': [0, 1], 
-    }
     
     def run_command(self, command: str, timeout: int = None):
         try:
+            args = shlex.split(command)
+            
             process = subprocess.Popen(
-                command,
-                shell=True,
+                args,            
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                preexec_fn=os.setsid 
+                preexec_fn=os.setsid,
             )
             
             try:
                 stdout, stderr = process.communicate(timeout=timeout)
                 returncode = process.returncode
-                
-                # Check if the return code is expected for the command
-                cmd_base = command.split()[0]
-                if cmd_base in self.KNOWN_NON_ERROR_CODES:
-                    if returncode in self.KNOWN_NON_ERROR_CODES[cmd_base]:
-                        returncode = 0  # Consider as success
                 
                 return stdout, stderr, returncode
                 

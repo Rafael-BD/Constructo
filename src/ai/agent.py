@@ -179,7 +179,8 @@ class AIAgent:
                     if returncode != 0:
                         error_msg = f"Command returned code {returncode}: {stderr.strip() if stderr else 'No error message'}"
                         self.terminal.log(error_msg, "ERROR")
-                        # Continue even after error, let the AI decide what to do
+
+                        # Continue mesmo após o erro para permitir resposta ao usuário
                         combined_result = error_msg
 
                     if combined_result:
