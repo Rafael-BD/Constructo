@@ -12,6 +12,7 @@ Constructo is an AI-powered pentesting and security agent designed to assist wit
 
 ## Prerequisites
 
+- A Linux-based system.
 - Python 3.7+
 - An Google Generative AI API key.
   - You can request access to the API [here](https://aistudio.google.com).
