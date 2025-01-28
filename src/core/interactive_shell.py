@@ -8,7 +8,7 @@ class InteractiveShell:
     def __init__(self):
         self.sessions = {}
         self.prompts = {
-            'msfconsole': r'msf\d*\s*>',  # Simplificado
+            'msfconsole': r'msf\d*\s*>',
             'sqlmap': r'\[.\]\s*$'
         }
         
@@ -17,95 +17,94 @@ class InteractiveShell:
         
         if program == 'msfconsole':
             try:
-                # Configuração básica do ambiente
+                # Basic environment configuration
                 env = os.environ.copy()
                 env['TERM'] = 'xterm'
                 
-                # Iniciar Metasploit de forma mais simples
+                # Start Metasploit in a simpler way
                 session = pexpect.spawn(
-                    '/usr/bin/msfconsole',  # Caminho completo
+                    '/usr/bin/msfconsole',  # Full path
                     encoding='utf-8',
                     env=env,
                     timeout=60,
                     echo=False
                 )
                 
-                # Aguardar inicialização com padrões mais flexíveis
+                # Wait for initialization with more flexible patterns
                 session.expect(['Metasploit', 'Framework', 'msf'], timeout=30)
                 
-                # Aguardar prompt
+                # Wait for prompt
                 index = session.expect([r'msf\d*\s*>', pexpect.TIMEOUT], timeout=30)
                 if index == 0:
-                    print("Metasploit iniciado com sucesso")
-                    # Limpar buffer inicial
+                    print("Metasploit started successfully")
+                    # Clear initial buffer
                     session.sendline('')
                     session.expect(r'msf\d*\s*>', timeout=10)
                     
                     self.sessions[session_id] = session
                     return session_id
                 else:
-                    print("Timeout aguardando prompt do Metasploit")
+                    print("Timeout waiting for Metasploit prompt")
                     session.close()
                     return None
                     
             except Exception as e:
-                print(f"Erro ao iniciar Metasploit: {str(e)}")
+                print(f"Error starting Metasploit: {str(e)}")
                 return None
                 
         else:
             session = pexpect.spawn(program, encoding='utf-8')
             
-            # Aguardar prompt inicial
+            # Wait for initial prompt
             if program in self.prompts:
                 try:
                     session.expect(self.prompts[program], timeout=30)
                 except pexpect.TIMEOUT:
-                    print(f"Aviso: Timeout aguardando prompt inicial de {program}")
+                    print(f"Warning: Timeout waiting for initial prompt of {program}")
         
         self.sessions[session_id] = session
         return session_id
         
     def send_command(self, session_id: str, command: str, expect_patterns: List[str] = None) -> Tuple[str, int]:
         if session_id not in self.sessions:
-            return "Sessão não encontrada", 1
+            return "Session not found", 1
             
         session = self.sessions[session_id]
         program = session_id.split('_')[0]
         
         if program == 'msfconsole':
             try:
-                # Garantir que estamos no prompt
+                # Ensure we are at the prompt
                 session.sendline('')
                 session.expect(r'msf\d*\s*>', timeout=10)
                 
-                # Enviar comando
+                # Send command
                 session.sendline(command)
                 
-                # Aguardar resposta com timeout maior
+                # Wait for response with longer timeout
                 index = session.expect([r'msf\d*\s*>', pexpect.TIMEOUT], timeout=120)
                 
                 output = session.before
                 return self._clean_output(output, program), 0 if index == 0 else 1
                 
             except pexpect.TIMEOUT:
-                return "Timeout aguardando resposta", -1
+                return "Timeout waiting for response", -1
             except pexpect.EOF:
-                return "Programa encerrado", -2
+                return "Program terminated", -2
                 
         else:
-            # ...existing code for other programs...
             pass
             
     def _clean_output(self, output: str, program: str) -> str:
         if not output:
             return ""
             
-        # Limpar códigos ANSI e caracteres de controle
+        # Clean ANSI codes and control characters
         output = re.sub(r'\x1b\[[0-9;]*[mGKH]', '', output)
         output = re.sub(r'[\x00-\x1F\x7F]', '', output)
         
         if program == 'msfconsole':
-            # Remover linhas vazias e prompts
+            # Remove empty lines and prompts
             lines = []
             for line in output.split('\n'):
                 line = line.strip()
@@ -116,7 +115,7 @@ class InteractiveShell:
         return output.strip()
     
     def close_session(self, session_id: str):
-        """Encerra uma sessão"""
+        """Closes a session"""
         if session_id in self.sessions:
             self.sessions[session_id].sendline('exit')
             self.sessions[session_id].close()

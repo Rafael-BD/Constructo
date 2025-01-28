@@ -9,7 +9,7 @@ async def main():
     agent = AIAgent(config['api_key'])
     console = Console()
     
-    console.print("[bold green]Terminal de Chat Iniciado[/bold green]")
+    console.print("[bold green]Chat Terminal Started[/bold green]")
     while True:
         try:
             user_input = Prompt.ask(">>> ")
@@ -19,10 +19,10 @@ async def main():
             response = await agent.process_command(user_input)
             
         except KeyboardInterrupt:
-            print("\nEncerrando programa...")
+            print("\nShutting down...")
             break
         except Exception as e:
-            console.print(f"[bold red]Erro:[/bold red] {e}")
+            console.print(f"[bold red]Error:[/bold red] {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())

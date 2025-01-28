@@ -1,6 +1,6 @@
 import subprocess
 import shlex
-# from .interactive_shell import InteractiveShell  # Desativado temporariamente
+# from .interactive_shell import InteractiveShell  # Temporarily disabled
 
 class LinuxInteraction:
     INTERACTIVE_COMMANDS = {
@@ -18,7 +18,7 @@ class LinuxInteraction:
     }
     
     def __init__(self):
-        # self.interactive_shell = InteractiveShell()  # Desativado temporariamente
+        # self.interactive_shell = InteractiveShell()  # Temporarily disabled
         self.active_sessions = {}
     
     def is_interactive_command(self, command: str) -> bool:
@@ -28,14 +28,14 @@ class LinuxInteraction:
                     for info in self.INTERACTIVE_COMMANDS.values()))
     
     def get_parent_session(self, command: str) -> str:
-        """Identifica qual sessão interativa deve receber o comando"""
+        """Identifies which interactive session should receive the command"""
         cmd = shlex.split(command)[0]
         
-        # Se é um comando principal, retorna ele mesmo
+        # If it's a main command, return itself
         if cmd in self.INTERACTIVE_COMMANDS:
             return cmd
             
-        # Se é um subcomando, procura a qual programa pertence
+        # If it's a subcommand, find which program it belongs to
         for program, info in self.INTERACTIVE_COMMANDS.items():
             if cmd in info.get('subcommands', []):
                 return program
@@ -48,15 +48,15 @@ class LinuxInteraction:
             parent_session = self.get_parent_session(command)
             
             if parent_session:
-                # Desativar comandos interativos
-                return "", f"Comando '{cmd}' não suportado: programas interativos estão desativados.", 1
+                # Disable interactive commands
+                return "", f"Command '{cmd}' not supported: interactive programs are disabled.", 1
             
-            # Comandos não interativos executam normalmente
+            # Non-interactive commands run normally
             result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
             return result.stdout, result.stderr, result.returncode
                 
         except subprocess.TimeoutExpired:
-            return "", "Comando interrompido por timeout.", 1
+            return "", "Command interrupted by timeout.", 1
 
     def analyze_output(self, output: str):
-        return f"Análise simples do output: {output[:50]}..."
+        return f"Simple output analysis: {output[:50]}..."

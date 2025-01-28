@@ -25,27 +25,27 @@ class UnifiedTerminal:
             "AGENT": "bold cyan"
         }
         
-    def start_processing(self, message="Processando..."):
-        """Mostra um spinner enquanto processa"""
+    def start_processing(self, message="Processing..."):
+        """Shows a spinner while processing"""
         if self.live:
             self.stop_processing()
             
         self.spinner = Spinner('dots')
-        self.live = Live(self.spinner, console=self.console, transient=True)  # transient=True para auto-limpar
+        self.live = Live(self.spinner, console=self.console, transient=True)  # transient=True to auto-clear
         self.live.start()
         
     def stop_processing(self):
-        """Para o spinner e limpa a linha corretamente"""
+        """Stops the spinner and clears the line correctly"""
         if self.live:
             self.live.stop()
             self.live = None
         if self.spinner:
             self.spinner = None
         self.clear_line()
-        self.console.print()  # Nova linha limpa
+        self.console.print()
         
     def log(self, message: str, level: str = "INFO", show_timestamp=True):
-        """Log com cores e timestamps opcionais"""
+        """Log with optional colors and timestamps"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         entry = {
             "timestamp": timestamp,
@@ -62,19 +62,19 @@ class UnifiedTerminal:
             self.console.print(f"[{self.log_styles.get(level, 'white')}]{message}[/]")
             
     def clear_line(self):
-        """Limpa a última linha do terminal sem usar códigos ANSI"""
-        print("\r", end="")  # Retorna cursor para início da linha
-        print(" " * self.console.width, end="\r")  # Limpa linha com espaços
+        """Clears the last line of the terminal without using ANSI codes"""
+        print("\r", end="")  # Return cursor to the beginning of the line
+        print(" " * self.console.width, end="\r")  # Clear line with spaces
         
     def stop_spinner(self):
-        """Para o spinner e limpa a linha"""
+        """Stops the spinner and clears the line"""
         if self.spinner:
             self.clear_line()
             self.spinner = None
             
     async def request_confirmation(self, message: str) -> bool:
-        """Solicita confirmação do usuário de forma mais limpa"""
-        self.console.print()  # Nova linha para limpar formatação
+        """Requests user confirmation in a cleaner way"""
+        self.console.print()  # New line to clear formatting
         return Confirm.ask(message, default=False)
             
     def _save_to_file(self, entry: dict):
@@ -82,7 +82,7 @@ class UnifiedTerminal:
             f.write(json.dumps(entry) + "\n")
             
     def log_agent(self, message: str):
-        """Exibe mensagem do 'Agente' em estilo ciano com timestamp"""
+        """Displays 'Agent' message in cyan style with timestamp"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         entry = {
             "timestamp": timestamp,
@@ -92,8 +92,8 @@ class UnifiedTerminal:
         self.messages.append(entry)
         self._save_to_file(entry)
         
-        # Limpa linha anterior e imprime mensagem
+        # Clear previous line and print message
         self.clear_line()
         self.console.print(
-            f"[dim]{timestamp}[/dim] [{self.log_styles['AGENT']}][Agente][/] {message}"
+            f"[dim]{timestamp}[/dim] [{self.log_styles['AGENT']}][Agent][/] {message}"
         )

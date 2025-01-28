@@ -1,6 +1,6 @@
 import google.generativeai as genai
 import json
-import re  # (1) para remover blocos ```json
+import re  # (1) to remove ```json blocks
 from datetime import datetime
 from ..core.terminal import UnifiedTerminal
 from ..core.linux_interaction import LinuxInteraction
@@ -27,7 +27,7 @@ class AIAgent:
             )
         )
         
-        # Iniciar chat com instruções do sistema
+        # Start chat with system instructions
         return model.start_chat(history=[
             {
                 "role": "user",
@@ -35,7 +35,7 @@ class AIAgent:
             },
             {
                 "role": "model",
-                "parts": ["Sistema inicializado com instruções. Pronto para executar comandos."]
+                "parts": ["System initialized with instructions. Ready to execute commands."]
             }
         ])
         
@@ -44,44 +44,44 @@ class AIAgent:
             context = self.context_manager.get_current_context()
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Iniciar processamento com spinner
-            self.terminal.start_processing("Processando...")
+            # Start processing with spinner
+            self.terminal.start_processing("Processing...")
             
-            prompt = f"""Contexto atual: {context}
-            Comando do usuário: {user_input}
+            prompt = f"""Current context: {context}
+            User command: {user_input}
             Timestamp: {current_time}
             
-            Analise a entrada e responda no formato JSON especificado."""
+            Analyze the input and respond in the specified JSON format."""
             
             response = self.chat.send_message(prompt)
             response_text = response.text if response else None
             
-            # Parar spinner e limpar
+            # Stop spinner and clear
             self.terminal.stop_processing()
             
             if not response_text:
                 raise ValueError("Received empty response from the chat model.")
             
             async def execute_step(parsed_response):
-                response_text = parsed_response.get("mensagem") or parsed_response.get("análise") or ""
+                response_text = parsed_response.get("message") or parsed_response.get("analysis") or ""
                 
-                # Use log_agent para exibir mensagem do Agente em ciano sem timestamp
+                # Use log_agent to display Agent message in cyan without timestamp
                 if response_text:
                     self.terminal.log_agent(response_text)
 
-                if "próximo_passo" in parsed_response and parsed_response["próximo_passo"].get("ação"):
-                    if parsed_response["próximo_passo"].get("requer_confirmação", True) and require_confirmation:
+                if "next_step" in parsed_response and parsed_response["next_step"].get("action"):
+                    if parsed_response["next_step"].get("requires_confirmation", True) and require_confirmation:
                         confirmation = await self.terminal.request_confirmation(
-                            f"Devo executar a ação '{parsed_response['próximo_passo']['ação']}'? "
-                            f"(Risco: {parsed_response['próximo_passo']['risco']})"
+                            f"Should I execute the action '{parsed_response['next_step']['action']}'? "
+                            f"(Risk: {parsed_response['next_step']['risk']})"
                         )
                         if not confirmation:
-                            return "Operação cancelada pelo usuário.", False
+                            return "Operation canceled by user.", False
 
-                    self.terminal.log(f"Executando: {parsed_response['próximo_passo']['ação']}", "EXEC")
-                    stdout, stderr, returncode = self.linux.run_command(parsed_response['próximo_passo']['ação'])
+                    self.terminal.log(f"Executing: {parsed_response['next_step']['action']}", "EXEC")
+                    stdout, stderr, returncode = self.linux.run_command(parsed_response['next_step']['action'])
 
-                    # Unificar stdout e stderr para o agente receber todo o log
+                    # Combine stdout and stderr for the agent to receive the entire log
                     combined_result = ""
                     if stdout.strip():
                         combined_result += stdout.rstrip()
@@ -90,11 +90,11 @@ class AIAgent:
 
                     if returncode != 0 and stderr.strip():
                         self.terminal.log(
-                            f"Comando retornou código {returncode}: {stderr.strip()}",
+                            f"Command returned code {returncode}: {stderr.strip()}",
                             "ERROR"
                         )
 
-                    # Se houver algo para mostrar
+                    # If there is something to show
                     if combined_result.strip():
                         self.terminal.log(combined_result, "OUTPUT", show_timestamp=False)
                         self.context_manager.add_to_context({
@@ -103,10 +103,10 @@ class AIAgent:
                             "content": combined_result
                         })
 
-                        if parsed_response.get("continuar", False):
-                            self.terminal.log("Analisando resultado...", "INFO")
+                        if parsed_response.get("continue", False):
+                            self.terminal.log("Analyzing result...", "INFO")
                             next_response = self.chat.send_message(
-                                f"Analise este resultado e decida o próximo passo:\n{combined_result}"
+                                f"Analyze this result and decide the next step:\n{combined_result}"
                             )
                             if next_response and next_response.text:
                                 clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", next_response.text)
@@ -116,11 +116,11 @@ class AIAgent:
                                 except json.JSONDecodeError:
                                     return clean_text.strip(), False
 
-                    # Retorna vazio para evitar duplicar a mesma mensagem
-                    return "", parsed_response.get("continuar", False)
+                    # Return empty to avoid duplicating the same message
+                    return "", parsed_response.get("continue", False)
 
-                # Retorna vazio quando não há comando
-                return "", parsed_response.get("continuar", False)
+                # Return empty when there is no command
+                return "", parsed_response.get("continue", False)
 
             def _extract_json(text: str) -> str:
                 start = text.find('{')
@@ -136,17 +136,17 @@ class AIAgent:
                     parsed = json.loads(json_str)
                     result, should_continue = await execute_step(parsed)
                     if should_continue:
-                        self.terminal.log("Continuando análise...", "INFO")
+                        self.terminal.log("Continuing analysis...", "INFO")
                         return await process_response(result)
                     return result
                 except json.JSONDecodeError:
                     return clean_text.strip()
 
             final_result = await process_response(response_text)
-            # Se final_result estiver vazio, não exibe "Processamento concluído."
+            # If final_result is empty, do not display "Processing completed."
             return final_result.strip() if final_result else ""
 
         except Exception as e:
-            error_msg = f"Erro: {str(e)}"
+            error_msg = f"Error: {str(e)}"
             self.terminal.log(error_msg, "ERROR")
             return error_msg
