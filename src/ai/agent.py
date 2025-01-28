@@ -1,3 +1,4 @@
+import asyncio
 import google.generativeai as genai
 from google.api_core import retry
 import time
@@ -78,33 +79,37 @@ class AIAgent:
         """Send message to API with retry logic"""
         max_attempts = self.retry_config.get('max_attempts', 3)
         retry_delay = self.retry_config.get('delay_between_retries', 10)
+        last_error = None
         
         for attempt in range(max_attempts):
             try:
-                # Wait for rate limiting if needed
                 self.rate_limiter.wait_if_needed()
-                
-                # Send message
                 response = self.chat.send_message(message)
-                return response.text if response else None
+                if response and response.text:
+                    return response.text
+                raise ValueError("Empty response from API")
                 
             except Exception as e:
+                last_error = e
                 error_msg = str(e)
                 
-                # Check if it's a rate limit error
                 if "429" in error_msg or "quota" in error_msg.lower():
                     if attempt < max_attempts - 1:
                         self.terminal.log(
                             f"Rate limit reached. Waiting {retry_delay}s before retry {attempt + 1}/{max_attempts}",
                             "WARNING"
                         )
-                        time.sleep(retry_delay)
+                        await asyncio.sleep(retry_delay)  # Use asyncio.sleep instead of time.sleep
                         continue
-                        
-                # If it's the last attempt or not a rate limit error, raise
-                raise
-        
-        raise Exception("Maximum retry attempts reached")
+                elif attempt < max_attempts - 1:
+                    self.terminal.log(
+                        f"API error: {error_msg}. Retrying {attempt + 1}/{max_attempts}...",
+                        "WARNING"
+                    )
+                    await asyncio.sleep(1)
+                    continue
+                
+        raise last_error or Exception("Maximum retry attempts reached")
         
     async def process_command(self, user_input: str):
         try:
@@ -130,17 +135,19 @@ class AIAgent:
             self.terminal.stop_processing()
             
             async def execute_step(parsed_response):
-                response_text = parsed_response.get("message") or parsed_response.get("analysis") or ""
-                
-                # Use log_agent to display Agent message in cyan without timestamp
-                if response_text:
-                    self.terminal.log_agent(response_text)
+                try:
+                    response_text = parsed_response.get("message") or parsed_response.get("analysis") or ""
+                    should_continue = parsed_response.get("continue", False)
+                    
+                    if response_text:
+                        self.terminal.log_agent(response_text)
 
-                if "next_step" in parsed_response and parsed_response["next_step"].get("action"):
+                    if "next_step" not in parsed_response or not parsed_response["next_step"].get("action"):
+                        return response_text, should_continue
+
                     action = parsed_response["next_step"]
                     risk = action.get("risk", "medium").lower()
                     
-                    # Check if confirmation is needed based on config
                     if action.get("requires_confirmation", True) and self._needs_confirmation(risk):
                         confirmation = await self.terminal.request_confirmation(
                             f"Should I execute the action '{action['action']}'? "
@@ -149,49 +156,61 @@ class AIAgent:
                         if not confirmation:
                             return "Operation canceled by user.", False
 
-                    self.terminal.log(f"Executing: {parsed_response['next_step']['action']}", "EXEC")
-                    stdout, stderr, returncode = self.linux.run_command(parsed_response['next_step']['action'])
+                    self.terminal.log(f"Executing: {action['action']}", "EXEC")
+                    stdout, stderr, returncode = self.linux.run_command(action['action'])
 
-                    # Combine stdout and stderr for the agent to receive the entire log
-                    combined_result = ""
+                    # Combine output and handle empty results better
+                    outputs = []
                     if stdout.strip():
-                        combined_result += stdout.rstrip()
+                        outputs.append(stdout.strip())
                     if stderr.strip():
-                        combined_result += f"\n{stderr.strip()}"
+                        outputs.append(stderr.strip())
+                    
+                    combined_result = "\n".join(outputs)
+                    
+                    # Always add to context, even if empty or error
+                    context_entry = {
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "type": "output" if returncode == 0 else "error",
+                        "content": combined_result or f"Command completed with code {returncode}"
+                    }
+                    self.context_manager.add_to_context(context_entry)
 
-                    if returncode != 0 and stderr.strip():
-                        self.terminal.log(
-                            f"Command returned code {returncode}: {stderr.strip()}",
-                            "ERROR"
-                        )
+                    if returncode != 0:
+                        error_msg = f"Command returned code {returncode}: {stderr.strip() if stderr else 'No error message'}"
+                        self.terminal.log(error_msg, "ERROR")
+                        # Continue even after error, let the AI decide what to do
+                        combined_result = error_msg
 
-                    # If there is something to show
-                    if combined_result.strip():
+                    if combined_result:
                         self.terminal.log(combined_result, "OUTPUT", show_timestamp=False)
-                        self.context_manager.add_to_context({
-                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "type": "output",
-                            "content": combined_result
-                        })
 
-                        if parsed_response.get("continue", False):
-                            self.terminal.log("Analyzing result...", "INFO")
-                            next_response_text = await self._send_message_with_retry(
-                                f"Analyze this result and decide the next step:\n{combined_result}"
-                            )
-                            if next_response_text:
+                    # Always continue if flagged, even with empty result
+                    if should_continue:
+                        self.terminal.log("Analyzing result...", "INFO")
+                        next_response_text = await self._send_message_with_retry(
+                            f"""Analyze this result and decide the next step.
+                            Command: {action['action']}
+                            Return code: {returncode}
+                            Output: {combined_result}"""
+                        )
+                        
+                        if next_response_text:
+                            try:
                                 clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", next_response_text)
-                                try:
-                                    next_parsed = json.loads(_extract_json(clean_text))
-                                    return await execute_step(next_parsed)
-                                except json.JSONDecodeError:
-                                    return clean_text.strip(), False
+                                next_parsed = json.loads(_extract_json(clean_text))
+                                return await execute_step(next_parsed)
+                            except json.JSONDecodeError:
+                                return clean_text.strip(), False
+                            except Exception as e:
+                                self.terminal.log(f"Error in continuation: {str(e)}", "ERROR")
+                                return str(e), False
 
-                    # Return empty to avoid duplicating the same message
-                    return "", parsed_response.get("continue", False)
-
-                # Return empty when there is no command
-                return "", parsed_response.get("continue", False)
+                    return response_text, should_continue
+                    
+                except Exception as e:
+                    self.terminal.log(f"Error in execute_step: {str(e)}", "ERROR")
+                    return str(e), False
 
             def _extract_json(text: str) -> str:
                 start = text.find('{')
@@ -201,17 +220,21 @@ class AIAgent:
                 return text
 
             async def process_response(response_text: str):
-                clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", response_text)
-                json_str = _extract_json(clean_text)
                 try:
+                    clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", response_text)
+                    json_str = _extract_json(clean_text)
                     parsed = json.loads(json_str)
+                    
                     result, should_continue = await execute_step(parsed)
-                    if should_continue:
-                        self.terminal.log("Continuing analysis...", "INFO")
+                    
+                    if should_continue and result:  # Só continua se houver resultado e should_continue
                         return await process_response(result)
                     return result
                 except json.JSONDecodeError:
                     return clean_text.strip()
+                except Exception as e:
+                    self.terminal.log(f"Error in process_response: {str(e)}", "ERROR")
+                    return str(e)
 
             final_result = await process_response(response_text)
             # If final_result is empty, do not display "Processing completed."
