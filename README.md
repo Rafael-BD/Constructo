@@ -13,8 +13,8 @@ Constructo is an AI-powered pentesting and security agent designed to assist wit
 ## Prerequisites
 
 - Python 3.7+
-- An optional Google Generative AI API key (placed in a .env file as GEMINI_API_KEY) for AI-based classification and summarization.
-  - You can request access to the API [here](https://aistudio.google.com). The tool does not need the paid version of the API; the free tier is sufficient and does not require a credit card.
+- An Google Generative AI API key.
+  - You can request access to the API [here](https://aistudio.google.com).
 
 ## Configuration
 
