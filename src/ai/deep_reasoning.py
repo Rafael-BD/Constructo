@@ -5,6 +5,7 @@ from .rate_limiter import RateLimiter
 from ..prompts.deep_reasoning_prompts import PERSPECTIVE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT
 import json
 import re
+import traceback
 
 class DeepReasoning:
     def __init__(self, agent):
@@ -15,145 +16,74 @@ class DeepReasoning:
         self.consecutive_failures = 0
         self.command_history = []
         
+        # Verificar se os prompts foram importados corretamente
+        if not PERSPECTIVE_ANALYSIS_PROMPT or not SYNTHESIS_PROMPT:
+            raise ValueError("Deep Reasoning prompts not properly imported")
+            
     def should_activate(self, situation_data: Dict) -> bool:
         """
-        Determines if Deep Reasoning should be activated based on multiple factors:
-        
-        1. Consecutive Failures:
-           - Tracks failed commands/operations
-           - Activates after N consecutive failures (default: 2)
-        
-        2. Command Risk Level:
-           - Analyzes command risk (none/low/medium/high)
-           - Automatically activates for high-risk commands
-           - Considers command type and potential impact
-        
-        3. Situation Complexity:
-           - Evaluates based on:
-             * Number of steps in action plan
-             * Dependencies between actions
-             * Required privilege level
-             * Potential impact scope
-        
-        4. Confidence Levels:
-           - Monitors agent's confidence in decisions
-           - Activates when confidence drops below threshold
-           - Considers historical confidence trend
-        
-        5. Pattern Recognition:
-           - Analyzes command history patterns
-           - Identifies repeated failed approaches
-           - Detects circular/ineffective strategies
+        Determines if Deep Reasoning should be activated based on:
+        1. Debug mode (forces activation)
+        2. Explicit request from main agent
+        3. Configured triggers from config.yaml
         """
-        # 1. Check consecutive failures
-        if self._check_consecutive_failures():
-            self.agent.terminal.log("Activating Deep Reasoning due to consecutive failures", "INFO")
+        # First check debug mode
+        if self.config.get('debug_mode', False):
+            self.agent.terminal.log("Activating Deep Reasoning - Debug mode enabled", "DEBUG")
             return True
-            
-        # 2. Analyze command risk level
-        if self._check_risk_level(situation_data):
-            self.agent.terminal.log("Activating Deep Reasoning due to high risk command", "INFO")
+        
+        # Then check if agent explicitly requested
+        if situation_data.get("requires_deep_reasoning", False):
+            self.agent.terminal.log("Activating Deep Reasoning - Explicitly requested by agent", "INFO")
             return True
-            
-        # 3. Evaluate situation complexity
-        if self._check_situation_complexity(situation_data):
-            self.agent.terminal.log("Activating Deep Reasoning due to situation complexity", "INFO")
+        
+        # Then check configured triggers
+        triggers = self.activation_triggers
+        
+        # Check consecutive failures
+        if self.consecutive_failures >= triggers.get('consecutive_failures', 2):
+            self.agent.terminal.log(
+                f"Activating Deep Reasoning - {self.consecutive_failures} consecutive failures",
+                "INFO"
+            )
             return True
-            
-        # 4. Monitor confidence levels
-        if self._check_confidence_levels(situation_data):
-            self.agent.terminal.log("Activating Deep Reasoning due to low confidence", "INFO")
+        
+        # Check risk level from next_step
+        if (triggers.get('high_risk_commands', True) and 
+            situation_data.get("next_step", {}).get("risk", "low") == "high"):
+            self.agent.terminal.log("Activating Deep Reasoning - High risk command detected", "INFO")
             return True
-            
-        # 5. Analyze command patterns
-        if self._check_command_patterns(situation_data):
-            self.agent.terminal.log("Activating Deep Reasoning due to detected pattern issues", "INFO")
+        
+        # Check complexity from reasoning_context
+        reasoning_context = situation_data.get('reasoning_context', {})
+        if (reasoning_context.get('complexity', 'low') == 'high' or
+            reasoning_context.get('impact_scope', 'low') == 'high'):
+            self.agent.terminal.log("Activating Deep Reasoning - High complexity/impact detected", "INFO")
             return True
             
         return False
         
-    def _check_consecutive_failures(self) -> bool:
-        """Checks if consecutive failures threshold is reached"""
-        threshold = self.activation_triggers.get('consecutive_failures', 2)
-        return self.consecutive_failures >= threshold
-        
-    def _check_risk_level(self, situation_data: Dict) -> bool:
-        """Analyzes command risk level and type"""
-        if not self.activation_triggers.get('high_risk_commands', True):
-            return False
-            
-        risk_level = situation_data.get('risk_level', 'low').lower()
-        command_type = situation_data.get('command_type', '')
-        
-        # High risk commands that always trigger deep reasoning
-        high_risk_commands = ['rm', 'chmod', 'chown', 'dd', 'mkfs']
-        
-        return (
-            risk_level == 'high' or
-            any(cmd in command_type for cmd in high_risk_commands)
-        )
-        
-    def _check_situation_complexity(self, situation_data: Dict) -> bool:
-        """Evaluates situation complexity based on multiple factors"""
-        if not self.activation_triggers.get('complex_situations', True):
-            return False
-            
-        complexity_score = 0
-        
-        # Check number of steps in action plan
-        action_plan = situation_data.get('action_plan', [])
-        if len(action_plan) > 3:
-            complexity_score += 1
-            
-        # Check for elevated privileges requirement
-        if situation_data.get('requires_privileges', False):
-            complexity_score += 1
-            
-        # Check impact scope
-        impact_scope = situation_data.get('impact_scope', 'low')
-        if impact_scope in ['medium', 'high']:
-            complexity_score += 1
-            
-        return complexity_score >= 2
-        
-    def _check_confidence_levels(self, situation_data: Dict) -> bool:
-        """Monitors confidence levels and trends"""
-        threshold = self.activation_triggers.get('low_confidence', 0.6)
-        current_confidence = situation_data.get('confidence', 1.0)
-        
-        return current_confidence < threshold
-        
-    def _check_command_patterns(self, situation_data: Dict) -> bool:
-        """Analyzes command history for problematic patterns"""
-        # Add command to history
-        self.command_history.append(situation_data)
-        
-        # Keep only last 10 commands
-        if len(self.command_history) > 10:
-            self.command_history.pop(0)
-            
-        # Check for repeated failed commands
-        command_counts = {}
-        for cmd in self.command_history[-5:]:  # Look at last 5 commands
-            command = cmd.get('command', '')
-            if command:
-                command_counts[command] = command_counts.get(command, 0) + 1
-                
-        # If same command tried more than twice recently
-        return any(count > 2 for count in command_counts.values())
-        
     def record_result(self, success: bool):
-        """
-        Records success/failure to track consecutive failures
-        """
+        """Records success/failure to track consecutive failures"""
         if success:
             self.consecutive_failures = 0
+            self.agent.terminal.log(f"Reset consecutive failures counter", "DEBUG")
         else:
             self.consecutive_failures += 1
+            self.agent.terminal.log(
+                f"Increased consecutive failures to {self.consecutive_failures}", 
+                "DEBUG"
+            )
             
     async def deep_analyze(self, situation: str, context: str) -> Dict[str, Any]:
         try:
             self.agent.terminal.start_deep_reasoning()
+            
+            # Log inicial dos parâmetros
+            self.agent.terminal.log(
+                f"\n{'='*50}\nStarting deep analysis with:\nSituation: {situation}\nContext: {context}\n{'='*50}\n",
+                "DEBUG"
+            )
             
             perspectives_results = []
             
@@ -162,65 +92,103 @@ class DeepReasoning:
                     f"Analyzing with {perspective_name} perspective..."
                 )
                 
-                original_config = None
                 try:
-                    # Salvar config anterior
-                    original_config = self.agent._temp_configure_model(perspective_cfg)
-                    
-                    prompt = PERSPECTIVE_ANALYSIS_PROMPT.format(
-                        perspective=perspective_name,
-                        situation=situation,
-                        context=context
-                    )
-                    
-                    response = await self.agent._send_message_with_retry(prompt)
-                    
-                    # Limpar e extrair JSON removendo quebras de linha extras
-                    cleaned = response.strip()
-                    cleaned = re.sub(r"```json\s*([\s\S]*?)```", r"\1", cleaned)
-                    
-                    if not cleaned:
-                        self.agent.terminal.log(
-                            f"Empty response for {perspective_name}", "WARNING"
-                        )
-                        continue
-                    
-                    # DEBUG log para analisar resposta bruta
+                    # Log da configuração
                     self.agent.terminal.log(
-                        f"Raw response for {perspective_name}: {cleaned}",
+                        f"\n{'='*50}\nPerspective config for {perspective_name}:\n{json.dumps(perspective_cfg, indent=2)}\n{'='*50}\n",
                         "DEBUG"
                     )
                     
-                    # Caso o JSON não comece corretamente, tentar buscar primeira chave
+                    original_config = self.agent._temp_configure_model(perspective_cfg)
+                    
+                    formatted_prompt = PERSPECTIVE_ANALYSIS_PROMPT.format(
+                        perspective=perspective_name,
+                        situation=str(situation),
+                        context=str(context)
+                    )
+                    
+                    response = await self.agent._send_message_with_retry(formatted_prompt)
+                    
+                    # Log da resposta bruta
+                    self.agent.terminal.log(
+                        f"\n{'='*50}\nRaw response for {perspective_name}:\n{response}\n{'='*50}\n",
+                        "DEBUG"
+                    )
+                    
+                    if not response:
+                        raise ValueError(f"Empty response received for {perspective_name}")
+                    
+                    # Limpar e extrair JSON
+                    cleaned = response.strip()
+                    cleaned = re.sub(r"```json\s*([\s\S]*?)```", r"\1", cleaned)
+                    
+                    # Log após limpeza inicial
+                    self.agent.terminal.log(
+                        f"\n{'='*50}\nCleaned response for {perspective_name}:\n{cleaned}\n{'='*50}\n",
+                        "DEBUG"
+                    )
+                    
+                    # Tentar encontrar JSON válido
                     if not cleaned.startswith("{"):
                         start_idx = cleaned.find("{")
                         if start_idx >= 0:
                             cleaned = cleaned[start_idx:]
+                            # Log após ajuste do JSON
+                            self.agent.terminal.log(
+                                f"\n{'='*50}\nAdjusted JSON for {perspective_name}:\n{cleaned}\n{'='*50}\n",
+                                "DEBUG"
+                            )
                     
                     try:
                         parsed_json = json.loads(cleaned)
-                        perspectives_results.append({
-                            "perspective": perspective_name,
-                            "analysis": parsed_json,
-                            "confidence": self._evaluate_confidence(parsed_json)
-                        })
-                    except json.JSONDecodeError as je:
-                        # Log mais detalhado em caso de erro de parse
+                        
+                        # Log do JSON parseado
                         self.agent.terminal.log(
-                            f"JSONDecodeError in {perspective_name} analysis: {str(je)}",
-                            "ERROR"
-                        )
-                        self.agent.terminal.log(
-                            f"Failed JSON: {cleaned[:200]}...", 
+                            f"\n{'='*50}\nParsed JSON for {perspective_name}:\n{json.dumps(parsed_json, indent=2)}\n{'='*50}\n",
                             "DEBUG"
                         )
                         
+                        # Verificar estrutura do JSON antes de usar
+                        if not isinstance(parsed_json, dict):
+                            raise ValueError(f"Parsed JSON is not a dictionary: {type(parsed_json)}")
+                        
+                        # Criar resultado com verificação de tipos
+                        perspective_result = {
+                            "perspective": perspective_name,
+                            "analysis": parsed_json,  # Aqui pode estar o problema
+                            "confidence": self._evaluate_confidence(parsed_json)
+                        }
+                        
+                        # Log do resultado final da perspectiva
+                        self.agent.terminal.log(
+                            f"\n{'='*50}\nPerspective result for {perspective_name}:\n{json.dumps(perspective_result, indent=2)}\n{'='*50}\n",
+                            "DEBUG"
+                        )
+                        
+                        perspectives_results.append(perspective_result)
+                        
+                    except json.JSONDecodeError as je:
+                        self.agent.terminal.log(
+                            f"\n{'='*50}\nJSON decode error in {perspective_name}:\n"
+                            f"Error: {str(je)}\n"
+                            f"Position: {je.pos}\n"
+                            f"Line: {je.lineno}, Column: {je.colno}\n"
+                            f"Document: {je.doc}\n"
+                            f"{'='*50}\n",
+                            "ERROR"
+                        )
+                        raise
+                        
                 except Exception as e:
                     self.agent.terminal.log(
-                        f"Error in {perspective_name} analysis: {str(e)}", "ERROR"
+                        f"\n{'='*50}\nError in {perspective_name} analysis:\n"
+                        f"Error type: {type(e).__name__}\n"
+                        f"Error message: {str(e)}\n"
+                        f"Traceback:\n{traceback.format_exc()}\n"
+                        f"{'='*50}\n",
+                        "ERROR"
                     )
                 finally:
-                    # Restaurar config se existir
                     if original_config is not None:
                         self._restore_model_config(original_config)
             
@@ -231,7 +199,16 @@ class DeepReasoning:
                     final_analysis = await self._synthesize_perspectives(perspectives_results, situation)
                     return final_analysis
                 except Exception as e:
-                    self.agent.terminal.log(f"Error in synthesis: {str(e)}", "ERROR")
+                    error_log = (
+                        f"\n{'='*50}\n"
+                        f"Error in synthesis:\n"
+                        f"Error type: {type(e).__name__}\n"
+                        f"Error details: {str(e)}\n"
+                        f"Full error: {repr(e)}\n\n"
+                        f"Available perspectives:\n{json.dumps(perspectives_results, indent=2)}\n"
+                        f"{'='*50}\n"
+                    )
+                    self.agent.terminal.log(error_log, "ERROR")
                     return {
                         "type": "analysis",
                         "message": "Partial analysis completed with some errors",
@@ -276,15 +253,20 @@ class DeepReasoning:
         # Use agent's restore method
         self.agent._restore_model_config(original_config)
     
-    def _evaluate_confidence(self, response: str) -> float:
+    def _evaluate_confidence(self, response: Dict) -> float:
         """
         Avalia o nível de confiança da análise baseado em diversos fatores
         """
+        # Log do que está sendo avaliado
+        self.agent.terminal.log(
+            f"\n{'='*50}\nEvaluating confidence for response:\n{json.dumps(response, indent=2)}\n{'='*50}\n",
+            "DEBUG"
+        )
         try:
             # Implementar lógica de avaliação de confiança
-            # Por enquanto retorna um valor padrão
-            return 0.7
-        except:
+            return response.get("confidence_level", 0.7)
+        except Exception as e:
+            self.agent.terminal.log(f"Error evaluating confidence: {str(e)}", "ERROR")
             return 0.5
             
     def _extract_json(self, text: str) -> str:

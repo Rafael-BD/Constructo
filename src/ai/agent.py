@@ -130,48 +130,39 @@ class AIAgent:
             context = self.context_manager.get_current_context()
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Start processing with spinner
-            self.terminal.start_processing("Processing...")
+            self.terminal.start_processing()
             
             prompt = f"""Current context: {context}
             User command: {user_input}
             Timestamp: {current_time}
             
+            Consider if this situation requires deep reasoning analysis.
+            If it does, set requires_deep_reasoning to true and provide reasoning_context.
+            
             Analyze the input and respond in the specified JSON format."""
             
-            # Use retry logic for API calls
             response_text = await self._send_message_with_retry(prompt)
             
             if not response_text:
                 raise ValueError("Received empty response from the chat model.")
             
-            # Stop spinner and clear
             self.terminal.stop_processing()
             
             async def execute_step(parsed_response):
                 try:
-                    # Verifica se a resposta pede Deep Reasoning
-                    if parsed_response.get("requires_deep_reasoning", False):
+                    # Check if deep reasoning is needed
+                    should_activate = (
+                        parsed_response.get("requires_deep_reasoning", False) or
+                        self.deep_reasoning.should_activate(parsed_response)
+                    )
+                    
+                    if should_activate:
                         reasoning_context = parsed_response.get("reasoning_context", {})
                         deep_analysis = await self.deep_reasoning.deep_analyze(
                             reasoning_context.get("situation", user_input),
                             self.context_manager.get_current_context()
                         )
-                        # Mescla a análise profunda na resposta
-                        parsed_response.update({
-                            "analysis": deep_analysis.get("final_analysis"),
-                            "next_step": {
-                                "action": deep_analysis.get("selected_approach"),
-                                "risk": deep_analysis.get("risk_assessment", "medium"),
-                                "requires_confirmation": True
-                            }
-                        })
-                    # Caso não peça explicitamente, verifica triggers automáticos
-                    elif self.deep_reasoning.should_activate(parsed_response):
-                        deep_analysis = await self.deep_reasoning.deep_analyze(
-                            user_input,
-                            self.context_manager.get_current_context()
-                        )
+                        # Update response with deep analysis results
                         parsed_response.update(deep_analysis)
                     
                     response_text = parsed_response.get("message") or parsed_response.get("analysis") or ""

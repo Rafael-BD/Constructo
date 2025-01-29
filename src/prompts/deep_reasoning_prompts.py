@@ -5,21 +5,14 @@ Context: {context}
 
 Format your response EXACTLY as:
 
-Consider the following aspects:
-1. Risks and opportunities
-2. Potential vulnerabilities
-3. Exploitation strategies
-4. Potential impact
-5. Recommended next steps
+{{
+    "analysis": "your detailed analysis",
+    "risks": ["list", "of", "identified", "risks"],
+    "opportunities": ["list", "of", "opportunities"],
+    "recommended_actions": ["prioritized", "action", "list"],
+    "confidence_level": 0-100
+}}
 
-Format your response in JSON:
-{
-"analysis": "your detailed analysis",
-"risks": ["list", "of", "identified", "risks"],
-"opportunities": ["list", "of", "opportunities"],
-"recommended_actions": ["prioritized", "action", "list"],
-"confidence_level": 0-100
-}"
 Important:
 1. Maintain valid JSON syntax
 2. Escape quotes properly
@@ -33,13 +26,14 @@ Situation: {situation}
 Perspectives: {perspectives}
 
 Respond STRICTLY in this format:
-{
-"final_analysis": "combined analysis summary",
-"selected_approach": "chosen methodology",
-"action_plan": ["step1", "step2", "step3"],
-"risk_assessment": "final risk evaluation",
-"confidence_score": 0-100
-}
+{{
+    "final_analysis": "combined analysis summary",
+    "selected_approach": "chosen methodology",
+    "action_plan": ["step1", "step2", "step3"],
+    "risk_assessment": "final risk evaluation",
+    "confidence_score": 0-100
+}}
+
 Rules:
 1. Keep JSON valid above all else
 2. Use only double quotes
