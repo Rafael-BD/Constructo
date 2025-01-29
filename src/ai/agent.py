@@ -10,6 +10,8 @@ from ..core.linux_interaction import LinuxInteraction
 from ..prompts.main_context import SYSTEM_PROMPT
 from .context_manager import ContextManager
 from .rate_limiter import RateLimiter
+from .deep_reasoning import DeepReasoning
+from typing import Dict
 
 class AIAgent:
     def __init__(self, config: dict):
@@ -37,23 +39,42 @@ class AIAgent:
             "high": 3
         }
         
+        self.deep_reasoning = DeepReasoning(self)
+        
+        # Set default balanced configuration
+        model_config = config.get('model', {}).get('default_config', {})
+        self.default_config = {
+            "temperature": model_config.get('temperature', 0.5),
+            "top_p": model_config.get('top_p', 0.7),
+            "top_k": model_config.get('top_k', 40)
+        }
+        
+        # Store original config before applying default balanced configuration
+        self.original_config = self._temp_configure_model(self.default_config)
+        
     def _initialize_chat(self):
         genai.configure(api_key=self.config['api_key'])
         
         # Get model configuration
         model_config = self.config.get('model', {})
+        default_config = model_config.get('default_config', {})
         
-        model = genai.GenerativeModel(
-            model_config.get('name', 'gemini-2.0-flash-exp'),
-            generation_config=genai.GenerationConfig(
-                temperature=model_config.get('temperature', 0.7),
-                top_p=model_config.get('top_p', 0.9),
-                top_k=model_config.get('top_k', 40),
-                max_output_tokens=model_config.get('max_output_tokens', 4096),
-            )
+        # Store configuration for later use
+        self.generation_config = genai.GenerationConfig(
+            temperature=default_config.get('temperature', 0.5),
+            top_p=default_config.get('top_p', 0.7),
+            top_k=default_config.get('top_k', 40),
+            max_output_tokens=model_config.get('max_output_tokens', 8096),
         )
         
-        return model.start_chat(history=[
+        # Create model with initial config
+        self.model = genai.GenerativeModel(
+            model_config.get('name', 'gemini-2.0-flash-exp'),
+            generation_config=self.generation_config
+        )
+        
+        # Start chat session
+        return self.model.start_chat(history=[
             {"role": "user", "parts": [SYSTEM_PROMPT]},
             {"role": "model", "parts": ["System initialized with instructions. Ready to execute commands."]}
         ])
@@ -116,8 +137,8 @@ class AIAgent:
             context = self.context_manager.get_current_context()
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Start processing with spinner
-            self.terminal.start_processing("Processing...")
+            # Start thinking spinner
+            self.terminal.start_processing()
             
             prompt = f"""Current context: {context}
             User command: {user_input}
@@ -136,6 +157,33 @@ class AIAgent:
             
             async def execute_step(parsed_response):
                 try:
+                    # Check if deep reasoning is requested by the agent
+                    if parsed_response.get("requires_deep_reasoning", False):
+                        reasoning_context = parsed_response.get("reasoning_context", {})
+                        deep_analysis = await self.deep_reasoning.deep_analyze(
+                            reasoning_context.get("situation", user_input),
+                            self.context_manager.get_current_context()
+                        )
+                        # Merge deep analysis results with original response
+                        parsed_response.update({
+                            "analysis": deep_analysis.get("final_analysis"),
+                            "next_step": {
+                                "action": deep_analysis.get("selected_approach"),
+                                "risk": deep_analysis.get("risk_assessment", "medium"),
+                                "requires_confirmation": True
+                            }
+                        })
+                    
+                    # Check automatic triggers for deep reasoning
+                    elif self.deep_reasoning.should_activate(parsed_response):
+                        deep_analysis = await self.deep_reasoning.deep_analyze(
+                            user_input,
+                            self.context_manager.get_current_context()
+                        )
+                        # Update response with deep analysis results
+                        parsed_response.update(deep_analysis)
+                    
+                    # Continue with normal execution
                     response_text = parsed_response.get("message") or parsed_response.get("analysis") or ""
                     should_continue = parsed_response.get("continue", False)
                     
@@ -207,10 +255,14 @@ class AIAgent:
                                 self.terminal.log(f"Error in continuation: {str(e)}", "ERROR")
                                 return str(e), False
 
+                    # Record success/failure for deep reasoning
+                    self.deep_reasoning.record_result(success=(returncode == 0))
+                    
                     return response_text, should_continue
                     
                 except Exception as e:
                     self.terminal.log(f"Error in execute_step: {str(e)}", "ERROR")
+                    self.deep_reasoning.record_result(success=False)
                     return str(e), False
 
             def _extract_json(text: str) -> str:
@@ -228,7 +280,7 @@ class AIAgent:
                     
                     result, should_continue = await execute_step(parsed)
                     
-                    if should_continue and result:  # Só continua se houver resultado e should_continue
+                    if should_continue and result: 
                         return await process_response(result)
                     return result
                 except json.JSONDecodeError:
@@ -245,3 +297,61 @@ class AIAgent:
             error_msg = f"Error: {str(e)}"
             self.terminal.log(error_msg, "ERROR")
             return error_msg
+
+    async def _analyze_with_deep_reasoning(self, situation: str) -> Dict:
+        """
+        Ativa o módulo de Deep Reasoning para análise profunda
+        """
+        context = self.context_manager.get_current_context()
+        return await self.deep_reasoning.deep_analyze(situation, context)
+
+    def _temp_configure_model(self, config: Dict) -> Dict:
+        """
+        Temporarily configures the model with new parameters and returns original configuration
+        """
+        original_config = {
+            "temperature": self.generation_config.temperature,
+            "top_p": self.generation_config.top_p,
+            "top_k": self.generation_config.top_k
+        }
+        
+        # Create new generation config
+        self.generation_config = genai.GenerationConfig(
+            temperature=config.get("temperature", original_config["temperature"]),
+            top_p=config.get("top_p", original_config["top_p"]),
+            top_k=config.get("top_k", original_config["top_k"]),
+            max_output_tokens=self.generation_config.max_output_tokens
+        )
+        
+        # Create new model instance with updated config
+        self.model = genai.GenerativeModel(
+            self.config.get('model', {}).get('name', 'gemini-2.0-flash-exp'),
+            generation_config=self.generation_config
+        )
+        
+        # Update chat session with new model
+        history = self.chat.history
+        self.chat = self.model.start_chat(history=history)
+        
+        return original_config
+
+    def _restore_model_config(self, original_config: Dict):
+        """
+        Restores the original model configuration
+        """
+        self.generation_config = genai.GenerationConfig(
+            temperature=original_config["temperature"],
+            top_p=original_config["top_p"],
+            top_k=original_config["top_k"],
+            max_output_tokens=self.generation_config.max_output_tokens
+        )
+        
+        # Create new model instance with original config
+        self.model = genai.GenerativeModel(
+            self.config.get('model', {}).get('name', 'gemini-2.0-flash-exp'),
+            generation_config=self.generation_config
+        )
+        
+        # Update chat session with new model
+        history = self.chat.history
+        self.chat = self.model.start_chat(history=history)
