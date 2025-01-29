@@ -16,7 +16,22 @@ from typing import Dict
 class AIAgent:
     def __init__(self, config: dict):
         self.config = config
-        self.chat = self._initialize_chat()
+        genai.configure(api_key=self.config['api_key'])  # Configurar a chave API aqui
+        model_config = self.config.get('model', {})
+        self.generation_config = genai.GenerationConfig(
+            temperature=model_config.get('temperature', 0.7),
+            top_p=model_config.get('top_p', 0.9),
+            top_k=model_config.get('top_k', 40),
+            max_output_tokens=model_config.get('max_output_tokens', 4096),
+        )
+        self.model = genai.GenerativeModel(
+            model_config.get('name', 'gemini-2.0-flash-exp'),
+            generation_config=self.generation_config  # Passar como argumento nomeado
+        )
+        self.chat = self.model.start_chat(history=[
+            {"role": "user", "parts": [SYSTEM_PROMPT]},
+            {"role": "model", "parts": ["System initialized with instructions. Ready to execute commands."]}
+        ])
         self.terminal = UnifiedTerminal()
         self.linux = LinuxInteraction()
         self.context_manager = ContextManager()
@@ -49,12 +64,7 @@ class AIAgent:
         
         model = genai.GenerativeModel(
             model_config.get('name', 'gemini-2.0-flash-exp'),
-            generation_config=genai.GenerationConfig(
-                temperature=model_config.get('temperature', 0.7),
-                top_p=model_config.get('top_p', 0.9),
-                top_k=model_config.get('top_k', 40),
-                max_output_tokens=model_config.get('max_output_tokens', 4096),
-            )
+            generation_config=self.generation_config  # Passar como argumento nomeado
         )
         
         return model.start_chat(history=[
@@ -283,19 +293,19 @@ class AIAgent:
         Temporarily configures the model with new parameters and returns original configuration.
         """
         original_config = {
-            "temperature": self.chat.generation_config.temperature,
-            "top_p": self.chat.generation_config.top_p,
-            "top_k": self.chat.generation_config.top_k
+            "temperature": self.generation_config.temperature,
+            "top_p": self.generation_config.top_p,
+            "top_k": self.generation_config.top_k
         }
-        self.chat.generation_config.temperature = config.get("temperature", original_config["temperature"])
-        self.chat.generation_config.top_p = config.get("top_p", original_config["top_p"])
-        self.chat.generation_config.top_k = config.get("top_k", original_config["top_k"])
+        self.generation_config.temperature = config.get("temperature", original_config["temperature"])
+        self.generation_config.top_p = config.get("top_p", original_config["top_p"])
+        self.generation_config.top_k = config.get("top_k", original_config["top_k"])
         return original_config
 
     def _restore_model_config(self, original_config: Dict):
         """
         Restores the model configuration to the previously saved settings.
         """
-        self.chat.generation_config.temperature = original_config["temperature"]
-        self.chat.generation_config.top_p = original_config["top_p"]
-        self.chat.generation_config.top_k = original_config["top_k"]
+        self.generation_config.temperature = original_config["temperature"]
+        self.generation_config.top_p = original_config["top_p"]
+        self.generation_config.top_k = original_config["top_k"]
