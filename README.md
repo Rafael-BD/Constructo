@@ -97,6 +97,7 @@ api:
 - [ ] Persistent memory and learning system
 - [ ] Deep reasoning module
 - [ ] Support for additional AI APIs
+- [ ] Access to internet search
 
 ## Contributing
 

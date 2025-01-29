@@ -7,14 +7,13 @@ class LinuxInteraction:
     
     def run_command(self, command: str, timeout: int = None):
         try:
-            args = shlex.split(command)
-            
             process = subprocess.Popen(
-                args,            
+                command,      
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 preexec_fn=os.setsid,
+                shell=True    
             )
             
             try:
