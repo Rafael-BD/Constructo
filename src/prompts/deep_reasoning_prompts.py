@@ -3,6 +3,8 @@ PERSPECTIVE_ANALYSIS_PROMPT = """Analyze the following pentesting situation from
 Situation: {situation}
 Context: {context}
 
+Format your response EXACTLY as:
+
 Consider the following aspects:
 1. Risks and opportunities
 2. Potential vulnerabilities
@@ -12,30 +14,35 @@ Consider the following aspects:
 
 Format your response in JSON:
 {
-    "analysis": "your detailed analysis",
-    "risks": ["identified risks list"],
-    "opportunities": ["opportunities list"],
-    "recommended_actions": ["prioritized action list"],
-    "confidence_level": "0-100"
-}"""
+"analysis": "your detailed analysis",
+"risks": ["list", "of", "identified", "risks"],
+"opportunities": ["list", "of", "opportunities"],
+"recommended_actions": ["prioritized", "action", "list"],
+"confidence_level": 0-100
+}"
+Important:
+1. Maintain valid JSON syntax
+2. Escape quotes properly
+3. Use double quotes for all strings
+4. Keep arrays simple with string items
+5. Never add commentary outside the JSON"""
 
-SYNTHESIS_PROMPT = """Analyze and synthesize the following perspectives for the situation:
+SYNTHESIS_PROMPT = """Analyze and synthesize these perspectives:
 
 Situation: {situation}
+Perspectives: {perspectives}
 
-Perspectives:
-{perspectives}
-
-Provide a final analysis that:
-1. Combines the most valuable insights from each perspective
-2. Identifies the best approach considering risk vs. benefit
-3. Proposes a concrete action plan
-
-Respond in JSON format:
+Respond STRICTLY in this format:
 {
-    "final_analysis": "combined analysis",
-    "selected_approach": "chosen approach",
-    "action_plan": ["detailed steps"],
-    "risk_assessment": "final risk assessment",
-    "confidence_score": "0-100"
-}""" 
+"final_analysis": "combined analysis summary",
+"selected_approach": "chosen methodology",
+"action_plan": ["step1", "step2", "step3"],
+"risk_assessment": "final risk evaluation",
+"confidence_score": 0-100
+}
+Rules:
+1. Keep JSON valid above all else
+2. Use only double quotes
+3. No markdown formatting
+4. Escape special characters
+5. No comments outside JSON"""

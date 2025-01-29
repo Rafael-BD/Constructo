@@ -71,21 +71,23 @@ class UnifiedTerminal:
         """Shows deep reasoning header with spinner"""
         if self.live:
             self.stop_processing()
-            
+        
+        self.console.print()  # Add blank line before header
         self.spinner = Spinner('dots')
         style_color = self.log_styles.get("DEEP_REASONING")
         
         class ReasoningHeader:
             def __rich_console__(self, console, options):
-                spinner_frame = self.spinner.render(time.time())
                 text = Text()
-                text.append(spinner_frame)
+                text.append(self.spinner.render(time.time()))
                 text.append(" Deep Reasoning...")
                 text.stylize(style_color)
                 yield Panel(
                     text,
                     style=style_color,
-                    expand=False
+                    expand=False,
+                    width=40,  # Fixed width for consistent formatting
+                    padding=(0, 2)  # Add horizontal padding
                 )
                 
             def __init__(self, spinner):
@@ -98,10 +100,12 @@ class UnifiedTerminal:
             refresh_per_second=20
         )
         self.live.start()
+        self.console.print()  # Add blank line after header
         
     def log_deep_reasoning_step(self, step: str):
         """Logs a deep reasoning step with dimmed style"""
-        self.console.print(f"[dim]→ {step}[/dim]")
+        if self.live:  # Only log if deep reasoning is active
+            self.console.print(f"[dim]  → {step}[/dim]")  # Added extra indent
         
     def start_analysis(self):
         """Shows analyzing spinner"""
