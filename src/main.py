@@ -1,6 +1,14 @@
 import asyncio
-from src.ai.agent import AIAgent
-from src.utils.config import load_config
+import os
+import sys
+from pathlib import Path
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.append(str(project_root))
+
+from ai.agent import AIAgent
+from utils.config import load_config
 from rich.console import Console
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -11,7 +19,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.clipboard import ClipboardData
 from os.path import expanduser
 from prompt_toolkit.application.current import get_app
-import pyperclip  # Add this import for system clipboard integration
+import pyperclip
 
 async def main():
     config = load_config()
@@ -32,7 +40,7 @@ async def main():
                 data = data.text
             # Copy to both internal and system clipboard
             event.app.clipboard.set_data(ClipboardData(text=data))
-            pyperclip.copy(data)  # Ensure only text is copied
+            pyperclip.copy(data)
             
     @kb.add('escape', 'v')
     @kb.add('escape', 'V')
@@ -54,7 +62,7 @@ async def main():
         except Exception as e:
             console.print(f"[red]Error pasting: {str(e)}[/red]")
     
-    # Initialize prompt session with correct parameters
+    # Initialize prompt session
     session = PromptSession(
         history=FileHistory(expanduser('~/.constructo_history')),
         auto_suggest=AutoSuggestFromHistory(),
@@ -80,7 +88,6 @@ async def main():
     
     while True:
         try:
-            # Get input with prompt_toolkit
             user_input = await session.prompt_async(
                 ">>> ",
                 complete_in_thread=True,
@@ -94,7 +101,7 @@ async def main():
         except KeyboardInterrupt:
             print("\nShutting down...")
             break
-        except EOFError:  # Ctrl+D
+        except EOFError:
             break
         except Exception as e:
             console.print(f"[bold red]Error:[/bold red] {e}")

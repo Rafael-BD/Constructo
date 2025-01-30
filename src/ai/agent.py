@@ -5,12 +5,12 @@ import time
 import json
 import re 
 from datetime import datetime
-from ..core.terminal import UnifiedTerminal
-from ..core.linux_interaction import LinuxInteraction
-from ..prompts.main_context_prompt import SYSTEM_PROMPT, get_system_prompt
-from .context_manager import ContextManager
-from .rate_limiter import RateLimiter
-from .deep_reasoning import DeepReasoning
+from core.terminal import UnifiedTerminal
+from core.linux_interaction import LinuxInteraction
+from prompts.main_context_prompt import SYSTEM_PROMPT, get_system_prompt
+from ai.context_manager import ContextManager
+from ai.rate_limiter import RateLimiter
+from ai.deep_reasoning import DeepReasoning
 from typing import Dict
 
 def _extract_json(text: str) -> str:

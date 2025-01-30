@@ -1,12 +1,13 @@
 from typing import List, Dict, Any
 import asyncio
 from datetime import datetime
-from .rate_limiter import RateLimiter
-from ..prompts.deep_reasoning_prompts import PERSPECTIVE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT, get_synthesis_prompt
+from ai.rate_limiter import RateLimiter
+from prompts.deep_reasoning_prompts import PERSPECTIVE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT, get_synthesis_prompt
 import json
 import re
 import traceback
 import google.generativeai as genai
+
 
 class DeepReasoning:
     def __init__(self, agent):

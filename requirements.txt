@@ -3,3 +3,4 @@ rich
 pyyaml
 pexpect
 prompt_toolkit
+paperclip
