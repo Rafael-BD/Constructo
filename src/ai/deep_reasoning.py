@@ -120,6 +120,9 @@ class DeepReasoning:
             self.agent.terminal.start_deep_reasoning()
             perspectives_results = []
             
+            # Obter a linguagem configurada
+            language = self.agent.config.get('agent', {}).get('language', 'en-US')
+            
             for perspective_name, perspective_cfg in self.perspectives.items():
                 self.agent.terminal.log_deep_reasoning_step(
                     f"Analyzing with {perspective_name} perspective..."
@@ -129,20 +132,14 @@ class DeepReasoning:
                     formatted_prompt = PERSPECTIVE_ANALYSIS_PROMPT.format(
                         perspective=perspective_name,
                         situation=str(situation),
-                        context=str(context)
+                        context=str(context),
+                        language=language
                     )
                     
                     response = await self._send_message(formatted_prompt, perspective_cfg)
                     
                     if not response:
                         raise ValueError(f"Empty response received for {perspective_name}")
-                    
-                    # Log perspective
-                    self.agent.terminal._save_to_file({
-                        "timestamp": datetime.now().strftime("%H:%M:%S"),
-                        "type": f"PERSPECTIVE_{perspective_name.upper()}",
-                        "content": response
-                    })
                     
                     perspective_result = {
                         "perspective": perspective_name,
@@ -156,42 +153,52 @@ class DeepReasoning:
                         f"Error in {perspective_name} analysis: {str(e)}", 
                         "ERROR"
                     )
+                    continue
             
-            # Continue with available results
-            if perspectives_results:
+            # If we couldn't get any perspective, return error
+            if not perspectives_results:
+                return {
+                    "type": "error",
+                    "message": "Failed to analyze from any perspective",
+                    "next_step": None
+                }
+            
+            # Tyyntyeshisining gvvilableilable pers
+            try:
                 self.agent.terminal.log_deep_reasoning_step("Synthesizing perspectives...")
+                
+                # If there's a rate limit error in synthesis, use individual analyses
                 try:
-                    final_analysis = await self._synthesize_perspectives(perspectives_results, situation)
-                    
-                    # Log final synthesis
-                    self.agent.terminal._save_to_file({
-                        "timestamp": datetime.now().strftime("%H:%M:%S"),
-                        "type": "DEEP_REASONING_SYNTHESIS",
-                        "content": final_analysis["analysis"]
-                    })
-                    
-                    # Return analysis without message to terminal
+                    final_analysis = await self._synthesize_perspectives(
+                        perspectives_results, 
+                        situation,
+                        language
+                    )
                     return {
                         "type": "analysis",
                         "analysis": final_analysis["analysis"],
                         "next_step": None
                     }
-                    
-                except Exception as e:
-                    error_log = f"Error in synthesis: {str(e)}"
-                    self.agent.terminal.log(error_log, "ERROR")
+                except Exception as synthesis_error:
+                    # If synthesis fails, combine individual analyses
+                    self.agent.terminal.log(f"Synthesis failed: {str(synthesis_error)}", "WARNING")
+                    combined_analysis = "\n\n".join([
+                        f"From {p['perspective']} perspective:\n{p['analysis']}"
+                        for p in perspectives_results
+                    ])
                     return {
                         "type": "analysis",
-                        "message": "Based on this deep reasoning synthesis, please analyze and suggest the next steps.",
-                        "analysis": str(perspectives_results),
+                        "analysis": combined_analysis,
                         "next_step": None
                     }
-            
-            return {
-                "type": "response",
-                "message": "Based on the deep analysis performed, please evaluate the results and determine the best action to take.",
-                "next_step": None
-            }
+                    
+            except Exception as e:
+                self.agent.terminal.log(f"Error in deep analysis: {str(e)}", "ERROR")
+                return {
+                    "type": "error",
+                    "message": "Deep analysis failed",
+                    "next_step": None
+                }
             
         finally:
             self.agent.terminal.stop_processing()
@@ -230,11 +237,11 @@ class DeepReasoning:
         
         raise ValueError("No valid JSON found in response")
     
-    async def _synthesize_perspectives(self, perspectives_results: List[Dict], situation: str) -> Dict:
+    async def _synthesize_perspectives(self, perspectives_results: List[Dict], situation: str, language: str) -> Dict:
         """
         Synthesizes different perspectives into a final analysis with streaming
         """
-        synthesis_prompt = self._create_synthesis_prompt(perspectives_results, situation)
+        synthesis_prompt = self._create_synthesis_prompt(perspectives_results, situation, language)
         
         try:
             # Stop the spinner before starting synthesis
@@ -325,11 +332,12 @@ class DeepReasoning:
                 "next_step": None
             }
     
-    def _create_synthesis_prompt(self, perspectives_results: List[Dict], situation: str) -> str:
+    def _create_synthesis_prompt(self, perspectives_results: List[Dict], situation: str, language: str) -> str:
         """Creates the prompt to synthesize different perspectives"""
-        return get_synthesis_prompt(self.language).format(
+        return get_synthesis_prompt(language).format(
             situation=situation,
-            perspectives=self._format_perspectives(perspectives_results)
+            perspectives=self._format_perspectives(perspectives_results),
+            language=language
         )
 
     def _format_perspectives(self, perspectives_results: List[Dict]) -> str:

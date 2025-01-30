@@ -1,6 +1,9 @@
 # Constructo
 
-Constructo is an AI-powered pentesting and security agent designed to assist with executing commands, analyzing logs, and making decisions based on the analysis. It is built to work with Linux/Kali commands and provides a detailed log of all actions.
+Constructo is an AI-powered pentesting and security agent designed to assist with executing commands, analyzing logs, and making autonomous decisions based on the analysis. It is built to work with Linux/Kali commands and provides a detailed log of all actions.
+
+### Example
+![Deep Reasoning Analysis Example](./assets/example.png)
 
 ## Features
 
@@ -10,6 +13,35 @@ Constructo is an AI-powered pentesting and security agent designed to assist wit
 - Request confirmation for critical actions
 - Rate limiting and retry logic for API calls
 - Deep reasoning for complex analysis
+
+## Use Cases
+
+Constructo can be effectively used in various security and automation scenarios, including:
+
+### Security Analysis
+- Basic security assessments and vulnerability scanning
+- Local machine security analysis (file permissions, open ports, etc.)
+- Network security analysis
+- Log analysis
+
+### Automation Tasks
+- Bulk domain analysis and filtering
+- Web scraping
+- Automated report generation
+- Repetitive task automation in security workflows
+
+### Code Analysis
+- Source code security review
+- Pattern detection in codebases
+- Static code analysis for vulnerabilities
+- Code quality assessment
+
+### Research and Reconnaissance
+- Information gathering for penetration testing
+- OSINT (Open Source Intelligence) collection
+- Security research data processing
+- Threat intelligence analysis
+
 
 ## Prerequisites
 
@@ -47,7 +79,8 @@ deep_reasoning:
     consecutive_failures: 4
     high_risk_commands: true
 
-security:
+agent:
+  language: "english" # Language of the agent responses
   require_confirmation: true  # Recommended for safety
   risk_threshold: "medium"   # "none", "low", "medium", "high" - only ask for risks above this level
 
@@ -65,10 +98,12 @@ api:
 - **api_key**: Your API key for the generative AI service.
 - **model**: Configuration for the AI model.
 - **deep_reasoning**: Settings for deep analysis module.
-- **security**: Security settings.
+- **agent**: Language and security settings.
 - **api**: API rate limiting and retry settings.
 
 ## Deep Reasoning
+### Video Demonstration
+<video src="./assets/deepReasoning.mp4" controls></video>
 
 The deep reasoning module provides multi-perspective analysis of complex situations. It analyzes problems from different viewpoints (conservative, balanced, creative) and synthesizes the results into actionable insights. The module is automatically activated when:
 
@@ -90,12 +125,11 @@ The deep reasoning module provides multi-perspective analysis of complex situati
 ## Known Issues
 
 - **Rate Limiting During Deep Reasoning:** When rate limiting is triggered during deep reasoning analysis, it may cause errors or infinite loops. Workaround: Increase rate limit thresholds or reduce analysis complexity.
-- **Command Output Handling:** Some commands may not have their output properly captured. Workaround: Use explicit output redirection.
-- **Concurrency Issues:** Multiple simultaneous operations may cause unexpected behavior. Workaround: Avoid running multiple instances.
+- **Command Output Handling:** Some commands may not have their output properly captured.
 
 ## Development Status
 
-**Warning:** This project is still in active development and may contain bugs or incomplete features. It is not recommended for production use. Key considerations:
+**Warning:** This project is still in active development and may contain bugs or incomplete features. Key considerations:
 
 - Always use in controlled environments
 - Keep `require_confirmation` enabled
