@@ -93,13 +93,34 @@ api:
     delay_between_retries: 20  # Delay in seconds between retries
 ```
 
-### Configuration Parameters
+## Installation and Execution
 
-- **api_key**: Your API key for the generative AI service.
-- **model**: Configuration for the AI model.
-- **deep_reasoning**: Settings for deep analysis module.
-- **agent**: Language and security settings.
-- **api**: API rate limiting and retry settings.
+### 1. Clone the latest release
+```bash
+git clone --branch latest https://github.com/constructo/constructo.git
+cd constructo
+```
+
+### 2. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Configure the API key
+Edit the `config.yaml` file and add your API key:
+```yaml
+api_key: "YOUR_API_KEY_HERE"
+```
+
+### 4. Run Constructo
+```bash
+python -m constructo
+```
+or
+
+```bash
+python src/main.py
+```
 
 ## Deep Reasoning
 ### Video Demonstration
