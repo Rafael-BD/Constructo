@@ -2,21 +2,31 @@ from typing import List, Dict, Any
 import asyncio
 from datetime import datetime
 from .rate_limiter import RateLimiter
-from ..prompts.deep_reasoning_prompts import PERSPECTIVE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT
+from ..prompts.deep_reasoning_prompts import PERSPECTIVE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT, get_synthesis_prompt
 import json
 import re
 import traceback
+import google.generativeai as genai
 
 class DeepReasoning:
     def __init__(self, agent):
+        """Initialize Deep Reasoning with agent configuration"""
         self.agent = agent
         self.config = agent.config.get('deep_reasoning', {})
         self.perspectives = self.config.get('perspectives', {})
         self.activation_triggers = self.config.get('activation_triggers', {})
         self.consecutive_failures = 0
         self.command_history = []
+        self.language = agent.config.get('agent', {}).get('language', 'en-US')
         
-        # Verificar se os prompts foram importados corretamente
+        # Create separate model for Deep Reasoning but use the same rate limiter
+        self.model = genai.GenerativeModel(
+            self.agent.config.get('model', {}).get('name', 'gemini-2.0-flash-exp')
+        )
+        # Use agent's rate limiter
+        self.rate_limiter = self.agent.rate_limiter
+        
+        # Check if prompts were imported correctly
         if not PERSPECTIVE_ANALYSIS_PROMPT or not SYNTHESIS_PROMPT:
             raise ValueError("Deep Reasoning prompts not properly imported")
             
@@ -34,7 +44,6 @@ class DeepReasoning:
         
         # Then check if agent explicitly requested
         if situation_data.get("requires_deep_reasoning", False):
-            self.agent.terminal.log("Activating Deep Reasoning - Explicitly requested by agent", "INFO")
             return True
         
         # Then check configured triggers
@@ -42,10 +51,6 @@ class DeepReasoning:
         
         # Check consecutive failures
         if self.consecutive_failures >= triggers.get('consecutive_failures', 2):
-            self.agent.terminal.log(
-                f"Activating Deep Reasoning - {self.consecutive_failures} consecutive failures",
-                "INFO"
-            )
             return True
         
         # Check risk level from next_step
@@ -67,24 +72,35 @@ class DeepReasoning:
         """Records success/failure to track consecutive failures"""
         if success:
             self.consecutive_failures = 0
-            self.agent.terminal.log(f"Reset consecutive failures counter", "DEBUG")
         else:
             self.consecutive_failures += 1
-            self.agent.terminal.log(
-                f"Increased consecutive failures to {self.consecutive_failures}", 
-                "DEBUG"
+            
+    async def _send_message(self, prompt: str, config: Dict = None) -> str:
+        """Send message using dedicated Deep Reasoning model"""
+        try:
+            # Use shared rate limiter
+            self.rate_limiter.wait_if_needed()
+            
+            if config:
+                generation_config = genai.GenerationConfig(**config)
+            else:
+                generation_config = self.agent.generation_config
+            
+            response = self.model.generate_content(
+                prompt,
+                generation_config=generation_config
             )
             
+            if response and response.text:
+                return response.text
+            raise ValueError("Empty response from API")
+        
+        except Exception as e:
+            raise Exception(f"Deep Reasoning API error: {str(e)}")
+
     async def deep_analyze(self, situation: str, context: str) -> Dict[str, Any]:
         try:
             self.agent.terminal.start_deep_reasoning()
-            
-            # Log inicial dos parâmetros
-            self.agent.terminal.log(
-                f"\n{'='*50}\nStarting deep analysis with:\nSituation: {situation}\nContext: {context}\n{'='*50}\n",
-                "DEBUG"
-            )
-            
             perspectives_results = []
             
             for perspective_name, perspective_cfg in self.perspectives.items():
@@ -93,141 +109,71 @@ class DeepReasoning:
                 )
                 
                 try:
-                    # Log da configuração
-                    self.agent.terminal.log(
-                        f"\n{'='*50}\nPerspective config for {perspective_name}:\n{json.dumps(perspective_cfg, indent=2)}\n{'='*50}\n",
-                        "DEBUG"
-                    )
-                    
-                    original_config = self.agent._temp_configure_model(perspective_cfg)
-                    
                     formatted_prompt = PERSPECTIVE_ANALYSIS_PROMPT.format(
                         perspective=perspective_name,
                         situation=str(situation),
                         context=str(context)
                     )
                     
-                    response = await self.agent._send_message_with_retry(formatted_prompt)
-                    
-                    # Log da resposta bruta
-                    self.agent.terminal.log(
-                        f"\n{'='*50}\nRaw response for {perspective_name}:\n{response}\n{'='*50}\n",
-                        "DEBUG"
-                    )
+                    response = await self._send_message(formatted_prompt, perspective_cfg)
                     
                     if not response:
                         raise ValueError(f"Empty response received for {perspective_name}")
                     
-                    # Limpar e extrair JSON
-                    cleaned = response.strip()
-                    cleaned = re.sub(r"```json\s*([\s\S]*?)```", r"\1", cleaned)
+                    # Log perspective
+                    self.agent.terminal._save_to_file({
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "type": f"PERSPECTIVE_{perspective_name.upper()}",
+                        "content": response
+                    })
                     
-                    # Log após limpeza inicial
-                    self.agent.terminal.log(
-                        f"\n{'='*50}\nCleaned response for {perspective_name}:\n{cleaned}\n{'='*50}\n",
-                        "DEBUG"
-                    )
+                    perspective_result = {
+                        "perspective": perspective_name,
+                        "analysis": response
+                    }
                     
-                    # Tentar encontrar JSON válido
-                    if not cleaned.startswith("{"):
-                        start_idx = cleaned.find("{")
-                        if start_idx >= 0:
-                            cleaned = cleaned[start_idx:]
-                            # Log após ajuste do JSON
-                            self.agent.terminal.log(
-                                f"\n{'='*50}\nAdjusted JSON for {perspective_name}:\n{cleaned}\n{'='*50}\n",
-                                "DEBUG"
-                            )
+                    perspectives_results.append(perspective_result)
                     
-                    try:
-                        parsed_json = json.loads(cleaned)
-                        
-                        # Log do JSON parseado
-                        self.agent.terminal.log(
-                            f"\n{'='*50}\nParsed JSON for {perspective_name}:\n{json.dumps(parsed_json, indent=2)}\n{'='*50}\n",
-                            "DEBUG"
-                        )
-                        
-                        # Verificar estrutura do JSON antes de usar
-                        if not isinstance(parsed_json, dict):
-                            raise ValueError(f"Parsed JSON is not a dictionary: {type(parsed_json)}")
-                        
-                        # Criar resultado com verificação de tipos
-                        perspective_result = {
-                            "perspective": perspective_name,
-                            "analysis": parsed_json,  # Aqui pode estar o problema
-                            "confidence": self._evaluate_confidence(parsed_json)
-                        }
-                        
-                        # Log do resultado final da perspectiva
-                        self.agent.terminal.log(
-                            f"\n{'='*50}\nPerspective result for {perspective_name}:\n{json.dumps(perspective_result, indent=2)}\n{'='*50}\n",
-                            "DEBUG"
-                        )
-                        
-                        perspectives_results.append(perspective_result)
-                        
-                    except json.JSONDecodeError as je:
-                        self.agent.terminal.log(
-                            f"\n{'='*50}\nJSON decode error in {perspective_name}:\n"
-                            f"Error: {str(je)}\n"
-                            f"Position: {je.pos}\n"
-                            f"Line: {je.lineno}, Column: {je.colno}\n"
-                            f"Document: {je.doc}\n"
-                            f"{'='*50}\n",
-                            "ERROR"
-                        )
-                        raise
-                        
                 except Exception as e:
                     self.agent.terminal.log(
-                        f"\n{'='*50}\nError in {perspective_name} analysis:\n"
-                        f"Error type: {type(e).__name__}\n"
-                        f"Error message: {str(e)}\n"
-                        f"Traceback:\n{traceback.format_exc()}\n"
-                        f"{'='*50}\n",
+                        f"Error in {perspective_name} analysis: {str(e)}", 
                         "ERROR"
                     )
-                finally:
-                    if original_config is not None:
-                        self._restore_model_config(original_config)
             
             # Continue with available results
             if perspectives_results:
                 self.agent.terminal.log_deep_reasoning_step("Synthesizing perspectives...")
                 try:
                     final_analysis = await self._synthesize_perspectives(perspectives_results, situation)
-                    return final_analysis
+                    
+                    # Log final synthesis
+                    self.agent.terminal._save_to_file({
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "type": "DEEP_REASONING_SYNTHESIS",
+                        "content": final_analysis["analysis"]
+                    })
+                    
+                    # Return analysis without message to terminal
+                    return {
+                        "type": "analysis",
+                        "analysis": final_analysis["analysis"],
+                        "next_step": None
+                    }
+                    
                 except Exception as e:
-                    error_log = (
-                        f"\n{'='*50}\n"
-                        f"Error in synthesis:\n"
-                        f"Error type: {type(e).__name__}\n"
-                        f"Error details: {str(e)}\n"
-                        f"Full error: {repr(e)}\n\n"
-                        f"Available perspectives:\n{json.dumps(perspectives_results, indent=2)}\n"
-                        f"{'='*50}\n"
-                    )
+                    error_log = f"Error in synthesis: {str(e)}"
                     self.agent.terminal.log(error_log, "ERROR")
                     return {
                         "type": "analysis",
-                        "message": "Partial analysis completed with some errors",
+                        "message": "Based on this deep reasoning synthesis, please analyze and suggest the next steps.",
                         "analysis": str(perspectives_results),
-                        "next_step": {
-                            "action": "continue",
-                            "risk": "medium",
-                            "requires_confirmation": True
-                        }
+                        "next_step": None
                     }
             
             return {
                 "type": "response",
-                "message": "Deep analysis encountered errors but will continue with standard processing",
-                "next_step": {
-                    "action": "continue",
-                    "risk": "medium",
-                    "requires_confirmation": True
-                }
+                "message": "Based on the deep analysis performed, please evaluate the results and determine the best action to take.",
+                "next_step": None
             }
             
         finally:
@@ -253,22 +199,6 @@ class DeepReasoning:
         # Use agent's restore method
         self.agent._restore_model_config(original_config)
     
-    def _evaluate_confidence(self, response: Dict) -> float:
-        """
-        Avalia o nível de confiança da análise baseado em diversos fatores
-        """
-        # Log do que está sendo avaliado
-        self.agent.terminal.log(
-            f"\n{'='*50}\nEvaluating confidence for response:\n{json.dumps(response, indent=2)}\n{'='*50}\n",
-            "DEBUG"
-        )
-        try:
-            # Implementar lógica de avaliação de confiança
-            return response.get("confidence_level", 0.7)
-        except Exception as e:
-            self.agent.terminal.log(f"Error evaluating confidence: {str(e)}", "ERROR")
-            return 0.5
-            
     def _extract_json(self, text: str) -> str:
         """Extract JSON from text, handling various formats"""
         # Remove leading/trailing whitespace
@@ -285,82 +215,113 @@ class DeepReasoning:
     
     async def _synthesize_perspectives(self, perspectives_results: List[Dict], situation: str) -> Dict:
         """
-        Synthesizes different perspectives into a final analysis
+        Synthesizes different perspectives into a final analysis with streaming
         """
         synthesis_prompt = self._create_synthesis_prompt(perspectives_results, situation)
         
         try:
-            response = await self.agent._send_message_with_retry(synthesis_prompt)
-            clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", response)
-            clean_text = clean_text.strip()
+            # Stop the spinner before starting synthesis
+            self.agent.terminal.stop_processing()
             
-            # Tenta encontrar o JSON válido na resposta
-            if not clean_text.startswith("{"):
-                start = clean_text.find("{")
-                if start >= 0:
-                    clean_text = clean_text[start:]
+            # Start synthesis streaming with line break
+            self.agent.terminal.log("\nThinking through all perspectives...", "DIM", show_timestamp=False)
+            await asyncio.sleep(0.5)  # Pause for visual separation
             
-            try:
-                return json.loads(clean_text)
-            except json.JSONDecodeError:
-                # Se falhar, retorna um formato válido com a resposta como string
-                return {
-                    "type": "analysis",
-                    "message": "Synthesis completed with parsing errors",
-                    "analysis": clean_text,
-                    "next_step": {
-                        "action": "continue",
-                        "risk": "medium",
-                        "requires_confirmation": True
-                    }
-                }
+            # Use shared rate limiter
+            self.rate_limiter.wait_if_needed()
+            
+            response = self.model.generate_content(
+                synthesis_prompt,
+                stream=True,
+                generation_config=self.agent.generation_config
+            )
+            
+            full_response = ""
+            current_line = ""
+            buffer = ""
+            last_char = " "
+            
+            for chunk in response:
+                if hasattr(chunk, 'text') and chunk.text:
+                    text = chunk.text.replace('\r', '')  # Remove carriage returns
+                    
+                    # Remove duplicate lines
+                    if text in full_response:
+                        continue
+                        
+                    full_response += text
+                    
+                    # Process text character by character
+                    for char in text:
+                        buffer += char
+                        
+                        # Handle line breaks
+                        if char == '\n':
+                            if buffer.strip() and buffer.strip() not in current_line:
+                                if current_line:
+                                    self.agent.terminal.log(current_line.rstrip(), "DIM", show_timestamp=False)
+                                current_line = buffer
+                                buffer = ""
+                                await asyncio.sleep(0.02)
+                        # Handle sentence endings
+                        elif char in ['.', '!', '?'] and last_char not in ['.', '!', '?']:
+                            self.agent.terminal.log(buffer, "DIM", show_timestamp=False, end="")
+                            buffer = ""
+                            await asyncio.sleep(0.1)
+                        # Handle other punctuation
+                        elif char in [',', ';', ':'] and last_char not in [',', ';', ':']:
+                            self.agent.terminal.log(buffer, "DIM", show_timestamp=False, end="")
+                            buffer = ""
+                            await asyncio.sleep(0.05)
+                        # Regular character printing
+                        elif len(buffer) > 2:  # Print in small word chunks
+                            self.agent.terminal.log(buffer, "DIM", show_timestamp=False, end="")
+                            buffer = ""
+                            await asyncio.sleep(0.01)
+                        
+                        last_char = char
+            
+            # Print any remaining text
+            if buffer.strip():
+                self.agent.terminal.log(buffer.rstrip(), "DIM", show_timestamp=False)
+            if current_line.strip():
+                self.agent.terminal.log(current_line.rstrip(), "DIM", show_timestamp=False)
+            
+            # Add final line break
+            self.agent.terminal.log("", show_timestamp=False)
+            
+            return {
+                "type": "analysis",
+                "analysis": full_response,
+                "next_step": None
+            }
             
         except Exception as e:
-            self.agent.terminal.log(f"Error in synthesis: {str(e)}", "ERROR")
+            error_msg = f"\nError in synthesis: {str(e)}"
+            self.agent.terminal.log(error_msg, "ERROR")
+            
+            error_response = "Based on the deep analysis performed, please evaluate the results and determine the next action."
+            
             return {
                 "type": "response",
-                "message": f"Synthesis error: {str(e)}",
-                "next_step": {
-                    "action": "continue",
-                    "risk": "medium",
-                    "requires_confirmation": True
-                }
+                "message": error_response,
+                "next_step": None
             }
     
     def _create_synthesis_prompt(self, perspectives_results: List[Dict], situation: str) -> str:
-        """
-        Cria o prompt para sintetizar as diferentes perspectivas
-        """
-        return f"""Analise rigorosamente as perspectivas abaixo seguindo ESTRITAMENTE o formato solicitado.
-
-Situação: {situation}
-
-Perspectivas disponíveis:
-{self._format_perspectives(perspectives_results)}
-
-Seu DEVER é:
-1. Combinar análises mantendo a estrutura JSON
-2. Listar passos executáveis
-3. Manter a sintaxe JSON válida
-4. Usar apenas aspas duplas
-5. Números sem aspas
-
-Formato OBRIGATÓRIO:
-{{
-    "final_analysis": "Resumo conciso",
-    "selected_approach": "Abordagem escolhida",
-    "action_plan": ["Passo 1", "Passo 2", "Passo 3"],
-    "risk_assessment": "Avaliação de risco final",
-    "confidence_score": 75
-}}"""
+        """Creates the prompt to synthesize different perspectives"""
+        return get_synthesis_prompt(self.language).format(
+            situation=situation,
+            perspectives=self._format_perspectives(perspectives_results)
+        )
 
     def _format_perspectives(self, perspectives_results: List[Dict]) -> str:
         """
-        Formata as perspectivas para inclusão no prompt de síntese
+        Formats perspectives for inclusion in synthesis prompt
         """
         formatted = []
         for p in perspectives_results:
-            formatted.append(f"Perspectiva {p['perspective']}:\n{p['analysis']}\n")
+            formatted.append(f"Perspective {p['perspective']}:\n{p['analysis']}\n")
         return "\n".join(formatted)
 
     def _validate_json(self, json_str: str) -> Dict:

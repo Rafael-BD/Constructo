@@ -81,7 +81,7 @@ class InteractiveShell:
                 # Send command
                 session.sendline(command)
                 
-                # Wait for response with longer timeout
+                # Wait for response with long timeout
                 index = session.expect([r'msf\d*\s*>', pexpect.TIMEOUT], timeout=120)
                 
                 output = session.before

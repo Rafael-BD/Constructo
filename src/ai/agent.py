@@ -7,16 +7,30 @@ import re
 from datetime import datetime
 from ..core.terminal import UnifiedTerminal
 from ..core.linux_interaction import LinuxInteraction
-from ..prompts.main_context import SYSTEM_PROMPT
+from ..prompts.main_context_prompt import SYSTEM_PROMPT, get_system_prompt
 from .context_manager import ContextManager
 from .rate_limiter import RateLimiter
 from .deep_reasoning import DeepReasoning
 from typing import Dict
 
+def _extract_json(text: str) -> str:
+    """Extract JSON from text, handling various formats"""
+    # Remove leading/trailing whitespace
+    text = text.strip()
+    
+    # Find JSON boundaries
+    start = text.find('{')
+    end = text.rfind('}') + 1
+    
+    if start >= 0 and end > 0:
+        return text[start:end]
+    
+    raise ValueError("No valid JSON found in response")
+
 class AIAgent:
     def __init__(self, config: dict):
         self.config = config
-        genai.configure(api_key=self.config['api_key'])  # Configurar a chave API aqui
+        genai.configure(api_key=self.config['api_key'])
         model_config = self.config.get('model', {})
         self.generation_config = genai.GenerationConfig(
             temperature=model_config.get('temperature', 0.7),
@@ -26,7 +40,7 @@ class AIAgent:
         )
         self.model = genai.GenerativeModel(
             model_config.get('name', 'gemini-2.0-flash-exp'),
-            generation_config=self.generation_config  # Passar como argumento nomeado
+            generation_config=self.generation_config 
         )
         self.chat = self.model.start_chat(history=[
             {"role": "user", "parts": [SYSTEM_PROMPT]},
@@ -55,16 +69,16 @@ class AIAgent:
         }
         
         self.deep_reasoning = DeepReasoning(self)
+        self.system_prompt = get_system_prompt(config)
         
     def _initialize_chat(self):
         genai.configure(api_key=self.config['api_key'])
         
-        # Get model configuration
         model_config = self.config.get('model', {})
         
         model = genai.GenerativeModel(
             model_config.get('name', 'gemini-2.0-flash-exp'),
-            generation_config=self.generation_config  # Passar como argumento nomeado
+            generation_config=self.generation_config
         )
         
         return model.start_chat(history=[
@@ -74,16 +88,13 @@ class AIAgent:
         
     def _needs_confirmation(self, risk_level: str) -> bool:
         """Determine if an action needs user confirmation based on config"""
-        security_config = self.config.get('security', {})
+        agent_config = self.config.get('agent', {})
         
-        # If confirmations are disabled globally
-        if not security_config.get('require_confirmation', True):
+        if not agent_config.get('require_confirmation', True):
             return False
             
-        # Get configured risk threshold
-        threshold = security_config.get('risk_threshold', 'medium').lower()
+        threshold = agent_config.get('risk_threshold', 'medium').lower()
         
-        # Compare risk levels
         action_risk = self.risk_levels.get(risk_level.lower(), 0)
         threshold_risk = self.risk_levels.get(threshold, 2)  # default to medium
         
@@ -113,7 +124,7 @@ class AIAgent:
                             f"Rate limit reached. Waiting {retry_delay}s before retry {attempt + 1}/{max_attempts}",
                             "WARNING"
                         )
-                        await asyncio.sleep(retry_delay)  # Use asyncio.sleep instead of time.sleep
+                        await asyncio.sleep(retry_delay)
                         continue
                 elif attempt < max_attempts - 1:
                     self.terminal.log(
@@ -130,14 +141,12 @@ class AIAgent:
             context = self.context_manager.get_current_context()
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            self.terminal.start_processing()
+            self.terminal.start_processing("Thinking...")
             
-            prompt = f"""Current context: {context}
+            prompt = f"""System: {self.system_prompt}
+            Current context: {context}
             User command: {user_input}
             Timestamp: {current_time}
-            
-            Consider if this situation requires deep reasoning analysis.
-            If it does, set requires_deep_reasoning to true and provide reasoning_context.
             
             Analyze the input and respond in the specified JSON format."""
             
@@ -162,8 +171,26 @@ class AIAgent:
                             reasoning_context.get("situation", user_input),
                             self.context_manager.get_current_context()
                         )
-                        # Update response with deep analysis results
-                        parsed_response.update(deep_analysis)
+                        
+                        # Send the deep reasoning analysis to the main model to make a decision
+                        analysis_prompt = f"""System: {self.system_prompt}
+                        
+                        A deep analysis has been performed. Based on this analysis, determine the best action to take:
+
+                        Deep Reasoning Analysis:
+                        {deep_analysis.get('analysis', '')}
+
+                        Please analyze this synthesis and decide the next step, strictly following the specified response format."""
+
+                        response = await self._send_message_with_retry(analysis_prompt)
+                        if response:
+                            try:
+                                clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", response)
+                                parsed = json.loads(_extract_json(clean_text))
+                                return await execute_step(parsed)
+                            except Exception as e:
+                                self.terminal.log(f"Error parsing Deep Reasoning response: {str(e)}", "ERROR")
+                                return str(e), False
                     
                     response_text = parsed_response.get("message") or parsed_response.get("analysis") or ""
                     should_continue = parsed_response.get("continue", False)
@@ -171,58 +198,84 @@ class AIAgent:
                     if response_text:
                         self.terminal.log_agent(response_text)
 
-                    if "next_step" not in parsed_response or not parsed_response["next_step"].get("action"):
+                    # If there's no next_step or it's None, just return
+                    if "next_step" not in parsed_response or parsed_response["next_step"] is None:
                         return response_text, should_continue
 
                     action = parsed_response["next_step"]
+                    # If there's no command to execute, just return
+                    if not action.get("command"):
+                        return response_text, should_continue
+                    
                     risk = action.get("risk", "medium").lower()
                     
-                    if action.get("requires_confirmation", True) and self._needs_confirmation(risk):
+                    if (action.get("requires_confirmation", False) and 
+                        self._needs_confirmation(risk)):
                         confirmation = await self.terminal.request_confirmation(
-                            f"Should I execute the action '{action['action']}'? "
+                            f"Should I execute the command '{action['command']}'? "
                             f"(Risk: {risk})"
                         )
                         if not confirmation:
                             return "Operation canceled by user.", False
 
-                    self.terminal.log(f"Executing: {action['action']}", "EXEC")
-                    stdout, stderr, returncode = self.linux.run_command(action['action'])
+                    self.terminal.log(f"Executing: {action['command']}", "EXEC")
+                    stdout, stderr, returncode = self.linux.run_command(action['command'])
 
-                    # Combine output and handle empty results better
-                    outputs = []
-                    if stdout.strip():
-                        outputs.append(stdout.strip())
-                    if stderr.strip():
-                        outputs.append(stderr.strip())
+                    self.terminal.stop_processing()
                     
-                    combined_result = "\n".join(outputs)
-                    
-                    # Always add to context, even if empty or error
-                    context_entry = {
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "type": "output" if returncode == 0 else "error",
-                        "content": combined_result or f"Command completed with code {returncode}"
-                    }
-                    self.context_manager.add_to_context(context_entry)
-
                     if returncode != 0:
                         error_msg = f"Command returned code {returncode}: {stderr.strip() if stderr else 'No error message'}"
                         self.terminal.log(error_msg, "ERROR")
 
-                        # Continue mesmo após o erro para permitir resposta ao usuário
-                        combined_result = error_msg
+                        context_entry = {
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "type": "error",
+                            "content": stderr if stderr else error_msg
+                        }
+                        self.context_manager.add_to_context(context_entry)
+                        
+                        self.deep_reasoning.record_result(success=False)
+                        
+                        if should_continue:
+                            self.terminal.log("Analyzing result...", "INFO")
+                            next_response_text = await self._send_message_with_retry(
+                                f"""Analyze this error and decide the next step.
+                                Command: {action['command']}
+                                Return code: {returncode}
+                                Error: {stderr if stderr else 'No error message'}"""
+                            )
+                            
+                            if next_response_text:
+                                try:
+                                    clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", next_response_text)
+                                    next_parsed = json.loads(_extract_json(clean_text))
+                                    return await execute_step(next_parsed)
+                                except Exception as e:
+                                    self.terminal.log(f"Error parsing response: {str(e)}", "ERROR")
+                                    return str(e), False
+                        
+                        return error_msg, should_continue
+                        
+                    if stdout.strip():
+                        self.terminal.log(stdout.strip(), "OUTPUT")
+                    else:
+                        self.terminal.log(f"Command completed successfully", "INFO")
 
-                    if combined_result:
-                        self.terminal.log(combined_result, "OUTPUT", show_timestamp=False)
+                    context_entry = {
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "type": "output",
+                        "content": stdout if stdout.strip() else "Command completed successfully"
+                    }
+                    self.context_manager.add_to_context(context_entry)
 
                     # Always continue if flagged, even with empty result
                     if should_continue:
                         self.terminal.log("Analyzing result...", "INFO")
                         next_response_text = await self._send_message_with_retry(
                             f"""Analyze this result and decide the next step.
-                            Command: {action['action']}
+                            Command: {action['command']}
                             Return code: {returncode}
-                            Output: {combined_result}"""
+                            Output: {stdout if stdout.strip() else 'No output'}"""
                         )
                         
                         if next_response_text:
@@ -236,22 +289,13 @@ class AIAgent:
                                 self.terminal.log(f"Error in continuation: {str(e)}", "ERROR")
                                 return str(e), False
 
-                    # Ao finalizar a execução, registre sucesso ou falha
-                    self.deep_reasoning.record_result(success=(returncode == 0))
-                    return response_text, should_continue
+                    self.deep_reasoning.record_result(success=True)
+                    return stdout if stdout.strip() else "Command completed successfully", should_continue
                     
                 except Exception as e:
-                    # Em caso de falha, registre e continue
                     self.deep_reasoning.record_result(success=False)
                     self.terminal.log(f"Error in execute_step: {str(e)}", "ERROR")
                     return str(e), False
-
-            def _extract_json(text: str) -> str:
-                start = text.find('{')
-                end = text.rfind('}') + 1
-                if start >= 0 and end > 0:
-                    return text[start:end]
-                return text
 
             async def process_response(response_text: str):
                 try:
@@ -261,7 +305,7 @@ class AIAgent:
                     
                     result, should_continue = await execute_step(parsed)
                     
-                    if should_continue and result:  # Só continua se houver resultado e should_continue
+                    if should_continue and result: 
                         return await process_response(result)
                     return result
                 except json.JSONDecodeError:
@@ -271,7 +315,6 @@ class AIAgent:
                     return str(e)
 
             final_result = await process_response(response_text)
-            # If final_result is empty, do not display "Processing completed."
             return final_result.strip() if final_result else ""
 
         except Exception as e:

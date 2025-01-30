@@ -5,11 +5,13 @@ from rich.prompt import Confirm
 from rich.panel import Panel
 from rich.text import Text
 from rich.console import Group
+from rich.box import ROUNDED
 from datetime import datetime
 import time
 import json
 import os
 from pathlib import Path
+from rich.layout import Layout
 
 class UnifiedTerminal:
     def __init__(self, log_file="logs/agent_history.log"):
@@ -35,7 +37,8 @@ class UnifiedTerminal:
             "AGENT": "bold cyan",
             "THINKING": "bold magenta",
             "ANALYZING": "bold blue",
-            "DEEP_REASONING": "bold #FF69B4"  # Hot pink
+            "DEEP_REASONING": "bold blue",
+            "DIM": "dim"
         }
         
     def start_processing(self, message="Thinking...", style="THINKING"):
@@ -68,44 +71,48 @@ class UnifiedTerminal:
         self.live.start()
         
     def start_deep_reasoning(self):
-        """Shows deep reasoning header with spinner"""
+        """Shows Deep Reasoning header with spinner"""
         if self.live:
             self.stop_processing()
         
-        self.console.print()  # Add blank line before header
         self.spinner = Spinner('dots')
         style_color = self.log_styles.get("DEEP_REASONING")
         
         class ReasoningHeader:
             def __rich_console__(self, console, options):
+                spinner_frame = self.spinner.render(time.time())
                 text = Text()
-                text.append(self.spinner.render(time.time()))
+                text.append(spinner_frame)
                 text.append(" Deep Reasoning...")
                 text.stylize(style_color)
-                yield Panel(
-                    text,
-                    style=style_color,
-                    expand=False,
-                    width=40,  # Fixed width for consistent formatting
-                    padding=(0, 2)  # Add horizontal padding
-                )
-                
+                yield text
+            
             def __init__(self, spinner):
                 self.spinner = spinner
-            
+        
         self.live = Live(
             ReasoningHeader(self.spinner),
             console=self.console,
-            transient=False,
+            transient=True,
             refresh_per_second=20
         )
         self.live.start()
-        self.console.print()  # Add blank line after header
         
-    def log_deep_reasoning_step(self, step: str):
-        """Logs a deep reasoning step with dimmed style"""
-        if self.live:  # Only log if deep reasoning is active
-            self.console.print(f"[dim]  → {step}[/dim]")  # Added extra indent
+        self._save_to_file({
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "type": "DEEP_REASONING",
+            "content": "Starting Deep Reasoning analysis"
+        })
+        
+    def log_deep_reasoning_step(self, message: str):
+        """Logs a Deep Reasoning step under the header with dimmed style"""
+        if self.live:
+            self.console.print(f"[dim]  → {message}[/dim]")
+            self._save_to_file({
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "type": "DEEP_REASONING_STEP",
+                "content": message
+            })
         
     def start_analysis(self):
         """Shows analyzing spinner"""
@@ -121,22 +128,36 @@ class UnifiedTerminal:
         self.clear_line()
         self.console.print()
         
-    def log(self, message: str, level: str = "INFO", show_timestamp=True):
-        """Log with optional colors and timestamps"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        entry = {
-            "timestamp": timestamp,
-            "type": level,
-            "content": message
-        }
-        
-        self.messages.append(entry)
-        self._save_to_file(entry)
-        
-        if show_timestamp:
-            self.console.print(f"[dim]{timestamp}[/dim] [{self.log_styles.get(level, 'white')}]{message}[/]")
-        else:
-            self.console.print(f"[{self.log_styles.get(level, 'white')}]{message}[/]")
+    def log(self, message: str, style: str = "INFO", show_timestamp: bool = True, end: str = "\n"):
+        """Logs a message with optional styling and timestamp"""
+        try:
+            style_color = self.log_styles.get(style, "")
+            
+            if show_timestamp:
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                formatted_message = f"[dark_green]{timestamp}[/dark_green] {message}"
+            else:
+                formatted_message = message
+            
+            if style_color:
+                if show_timestamp:
+                    self.console.print(formatted_message, style=f"default {style_color}", end=end)
+                else:
+                    self.console.print(formatted_message, style=style_color, end=end)
+            else:
+                self.console.print(formatted_message, end=end)
+            
+            if show_timestamp:
+                self._save_to_file({
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    "type": style,
+                    "content": message
+                })
+            
+        except Exception as e:
+            # Fallback to basic print if rich console fails
+            print(f"Logging error: {str(e)}")
+            print(message)
             
     def clear_line(self):
         """Clears the last line of the terminal without using ANSI codes"""
