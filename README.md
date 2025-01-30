@@ -103,7 +103,9 @@ api:
 
 ## Deep Reasoning
 ### Video Demonstration
-<video src="./assets/deepReasoning.mp4" controls></video>
+https://github.com/user-attachments/assets/d8d58cc6-4d63-408d-ad13-57c03a0f9ec8
+
+
 
 The deep reasoning module provides multi-perspective analysis of complex situations. It analyzes problems from different viewpoints (conservative, balanced, creative) and synthesizes the results into actionable insights. The module is automatically activated when:
 
