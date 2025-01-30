@@ -1,6 +1,6 @@
-google-generativeai
-rich
-pyyaml
-pexpect
-prompt_toolkit
-paperclip
+google-generativeai>=0.3.0
+rich>=10.0.0
+pyyaml>=6.0.0
+pexpect>=4.8.0
+prompt_toolkit>=3.0.0
+pyperclip>=1.8.0

@@ -78,26 +78,49 @@ class DeepReasoning:
             
     async def _send_message(self, prompt: str, config: Dict = None) -> str:
         """Send message using dedicated Deep Reasoning model"""
-        try:
-            # Use shared rate limiter
-            self.rate_limiter.wait_if_needed()
-            
-            if config:
-                generation_config = genai.GenerationConfig(**config)
-            else:
-                generation_config = self.agent.generation_config
-            
-            response = self.model.generate_content(
-                prompt,
-                generation_config=generation_config
-            )
-            
-            if response and response.text:
-                return response.text
-            raise ValueError("Empty response from API")
+        max_attempts = self.agent.retry_config.get('max_attempts', 3)
+        retry_delay = self.agent.retry_config.get('delay_between_retries', 10)
+        last_error = None
         
-        except Exception as e:
-            raise Exception(f"Deep Reasoning API error: {str(e)}")
+        for attempt in range(max_attempts):
+            try:
+                await self.rate_limiter.wait_if_needed_async()
+                
+                if config:
+                    generation_config = genai.GenerationConfig(**config)
+                else:
+                    generation_config = self.agent.generation_config
+                
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=generation_config
+                )
+                
+                if response and response.text:
+                    return response.text
+                raise ValueError("Empty response from API")
+                
+            except Exception as e:
+                last_error = e
+                error_msg = str(e)
+                
+                if "429" in error_msg or "quota" in error_msg.lower():
+                    if attempt < max_attempts - 1:
+                        self.agent.terminal.log(
+                            f"Rate limit reached in Deep Reasoning. Waiting {retry_delay}s before retry {attempt + 1}/{max_attempts}",
+                            "WARNING"
+                        )
+                        await asyncio.sleep(retry_delay)
+                        continue
+                elif attempt < max_attempts - 1:
+                    self.agent.terminal.log(
+                        f"Deep Reasoning API error: {error_msg}. Retrying {attempt + 1}/{max_attempts}...",
+                        "WARNING"
+                    )
+                    await asyncio.sleep(1)
+                    continue
+                
+        raise last_error or Exception("Maximum retry attempts reached")
 
     async def deep_analyze(self, situation: str, context: str) -> Dict[str, Any]:
         try:
@@ -229,7 +252,7 @@ class DeepReasoning:
             await asyncio.sleep(0.5)  # Pause for visual separation
             
             # Use shared rate limiter
-            self.rate_limiter.wait_if_needed()
+            await self.rate_limiter.wait_if_needed_async()
             
             response = self.model.generate_content(
                 synthesis_prompt,

@@ -108,7 +108,9 @@ class AIAgent:
         
         for attempt in range(max_attempts):
             try:
-                self.rate_limiter.wait_if_needed()
+                # Esperar antes de fazer a requisição
+                await self.rate_limiter.wait_if_needed_async()  # Mudado para versão async
+                
                 response = self.chat.send_message(message)
                 if response and response.text:
                     return response.text
@@ -167,30 +169,41 @@ class AIAgent:
                     
                     if should_activate:
                         reasoning_context = parsed_response.get("reasoning_context", {})
-                        deep_analysis = await self.deep_reasoning.deep_analyze(
-                            reasoning_context.get("situation", user_input),
-                            self.context_manager.get_current_context()
-                        )
-                        
-                        # Send the deep reasoning analysis to the main model to make a decision
-                        analysis_prompt = f"""System: {self.system_prompt}
-                        
-                        A deep analysis has been performed. Based on this analysis, determine the best action to take:
+                        try:
+                            deep_analysis = await self.deep_reasoning.deep_analyze(
+                                reasoning_context.get("situation", user_input),
+                                self.context_manager.get_current_context()
+                            )
+                            
+                            # Se o deep_analysis retornou erro, continuar com o fluxo normal
+                            if deep_analysis.get("type") == "error":
+                                self.terminal.log("Deep reasoning failed, continuing with standard analysis", "WARNING")
+                                return await execute_step(parsed_response)
+                            
+                            # Enviar a análise para o modelo principal
+                            analysis_prompt = f"""System: {self.system_prompt}
+                            
+                            A deep analysis has been performed. Based on this analysis, determine the best action to take:
 
-                        Deep Reasoning Analysis:
-                        {deep_analysis.get('analysis', '')}
+                            Deep Reasoning Analysis:
+                            {deep_analysis.get('analysis', '')}
 
-                        Please analyze this synthesis and decide the next step, strictly following the specified response format."""
+                            Please analyze this synthesis and decide the next step, strictly following the specified response format."""
 
-                        response = await self._send_message_with_retry(analysis_prompt)
-                        if response:
-                            try:
-                                clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", response)
-                                parsed = json.loads(_extract_json(clean_text))
-                                return await execute_step(parsed)
-                            except Exception as e:
-                                self.terminal.log(f"Error parsing Deep Reasoning response: {str(e)}", "ERROR")
-                                return str(e), False
+                            response = await self._send_message_with_retry(analysis_prompt)
+                            if response:
+                                try:
+                                    clean_text = re.sub(r"```json\s*([\s\S]*?)```", r"\1", response)
+                                    parsed = json.loads(_extract_json(clean_text))
+                                    return await execute_step(parsed)
+                                except Exception as e:
+                                    self.terminal.log(f"Error parsing Deep Reasoning response: {str(e)}", "ERROR")
+                                    # Em caso de erro, continuar com o fluxo normal
+                                    return await execute_step(parsed_response)
+                        except Exception as e:
+                            self.terminal.log(f"Deep Reasoning failed: {str(e)}", "ERROR")
+                            # Em caso de erro no Deep Reasoning, continuar com o fluxo normal
+                            return await execute_step(parsed_response)
                     
                     response_text = parsed_response.get("message") or parsed_response.get("analysis") or ""
                     should_continue = parsed_response.get("continue", False)
@@ -268,14 +281,14 @@ class AIAgent:
                     }
                     self.context_manager.add_to_context(context_entry)
 
-                    # Always continue if flagged, even with empty result
+                    # Sempre continuar se should_continue for True
                     if should_continue:
                         self.terminal.log("Analyzing result...", "INFO")
                         next_response_text = await self._send_message_with_retry(
-                            f"""Analyze this result and decide the next step.
+                            f"""Analyze this result and determine the next step.
                             Command: {action['command']}
                             Return code: {returncode}
-                            Output: {stdout if stdout.strip() else 'No output'}"""
+                            Status: Command completed successfully"""
                         )
                         
                         if next_response_text:
