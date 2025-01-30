@@ -97,7 +97,7 @@ api:
 
 ### 1. Clone the latest release
 ```bash
-git clone --branch latest https://github.com/constructo/constructo.git
+git clone --branch latest https://github.com/Rafael-BD/Constructo.git
 cd constructo
 ```
 
