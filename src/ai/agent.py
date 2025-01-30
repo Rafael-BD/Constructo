@@ -140,6 +140,12 @@ class AIAgent:
         
     async def process_command(self, user_input: str):
         try:
+            # Temp
+            if hasattr(self, '_current_command') and self._current_command == user_input:
+                return "Command already being processed. Please wait."
+            
+            self._current_command = user_input
+            
             context = self.context_manager.get_current_context()
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
@@ -161,6 +167,12 @@ class AIAgent:
             
             async def execute_step(parsed_response):
                 try:
+                    # Temp
+                    if hasattr(self, '_last_action') and self._last_action == parsed_response:
+                        return "Action already completed.", False
+                    
+                    self._last_action = parsed_response
+                    
                     # Check if deep reasoning is needed
                     should_activate = (
                         parsed_response.get("requires_deep_reasoning", False) or
@@ -175,12 +187,12 @@ class AIAgent:
                                 self.context_manager.get_current_context()
                             )
                             
-                            # Se o deep_analysis retornou erro, continuar com o fluxo normal
+                            # If deep_analysis returned error, continue with standard analysis
                             if deep_analysis.get("type") == "error":
                                 self.terminal.log("Deep reasoning failed, continuing with standard analysis", "WARNING")
                                 return await execute_step(parsed_response)
                             
-                            # Enviar a análise para o modelo principal
+                            # Send analysis to main model
                             analysis_prompt = f"""System: {self.system_prompt}
                             
                             A deep analysis has been performed. Based on this analysis, determine the best action to take:
@@ -198,11 +210,11 @@ class AIAgent:
                                     return await execute_step(parsed)
                                 except Exception as e:
                                     self.terminal.log(f"Error parsing Deep Reasoning response: {str(e)}", "ERROR")
-                                    # Em caso de erro, continuar com o fluxo normal
+                                    # If error, continue with standard analysis
                                     return await execute_step(parsed_response)
                         except Exception as e:
                             self.terminal.log(f"Deep Reasoning failed: {str(e)}", "ERROR")
-                            # Em caso de erro no Deep Reasoning, continuar com o fluxo normal
+                            # If error, continue with standard analysis
                             return await execute_step(parsed_response)
                     
                     response_text = parsed_response.get("message") or parsed_response.get("analysis") or ""
@@ -288,7 +300,10 @@ class AIAgent:
                             f"""Analyze this result and determine the next step.
                             Command: {action['command']}
                             Return code: {returncode}
-                            Status: Command completed successfully"""
+                            Output: {stdout if stdout.strip() else 'No output'}
+                            Status: Command completed successfully
+
+                            Based on this output, determine the next step."""
                         )
                         
                         if next_response_text:

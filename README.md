@@ -9,6 +9,7 @@ Constructo is an AI-powered pentesting and security agent designed to assist wit
 - Make decisions based on analyses
 - Request confirmation for critical actions
 - Rate limiting and retry logic for API calls
+- Deep reasoning for complex analysis
 
 ## Prerequisites
 
@@ -30,60 +31,77 @@ model:
   top_p: 0.9
   top_k: 40
 
+deep_reasoning:
+  debug_mode: false  # When true, activate deep reasoning in all requests
+  perspectives:
+    conservative:
+      temperature: 0.3
+      top_p: 0.5
+    balanced:
+      temperature: 0.5
+      top_p: 0.7
+    creative:
+      temperature: 0.8
+      top_p: 0.9
+  activation_triggers:
+    consecutive_failures: 4
+    high_risk_commands: true
+
 security:
-  require_confirmation: false  # false to disable all confirmations
+  require_confirmation: true  # Recommended for safety
   risk_threshold: "medium"   # "none", "low", "medium", "high" - only ask for risks above this level
 
 api:
   rate_limit:
-    requests_per_minute: 10  # Maximum requests per minute
-    delay_between_requests: 5  # Delay in seconds between requests
+    requests_per_minute: 4  # Maximum requests per minute
+    delay_between_requests: 10  # Delay in seconds between requests
   retry:
-    max_attempts: 3  # Maximum number of retry attempts
-    delay_between_retries: 10  # Delay in seconds between retries
+    max_attempts: 5  # Maximum number of retry attempts
+    delay_between_retries: 20  # Delay in seconds between retries
 ```
 
 ### Configuration Parameters
 
 - **api_key**: Your API key for the generative AI service.
 - **model**: Configuration for the AI model.
-  - **name**: Name of the model.
-  - **max_output_tokens**: Maximum number of tokens in the output.
-  - **temperature**: Sampling temperature.
-  - **top_p**: Top-p sampling parameter.
-  - **top_k**: Top-k sampling parameter.
+- **deep_reasoning**: Settings for deep analysis module.
 - **security**: Security settings.
-  - **require_confirmation**: Whether to require confirmation for actions.
-  - **risk_threshold**: Minimum risk level to require confirmation.
-- **api**: API settings.
-  - **rate_limit**: Rate limiting settings.
-    - **requests_per_minute**: Maximum number of requests per minute.
-    - **delay_between_requests**: Delay in seconds between requests.
-  - **retry**: Retry settings.
-    - **max_attempts**: Maximum number of retry attempts.
-    - **delay_between_retries**: Delay in seconds between retries.
+- **api**: API rate limiting and retry settings.
 
-## Running Constructo
+## Deep Reasoning
 
-1. Clone the repository:
-   ```sh
-   git clone https://github.com/Rafael-BD/Constructo.git
-   cd Constructo
-   ```
+The deep reasoning module provides multi-perspective analysis of complex situations. It analyzes problems from different viewpoints (conservative, balanced, creative) and synthesizes the results into actionable insights. The module is automatically activated when:
 
-2. Install the required dependencies:
-   ```sh
-   pip install -r requirements.txt
-   ```
+- High risk commands are detected
+- Complex situations require deeper analysis
+- Multiple consecutive failures occur
+- Explicitly requested by the main agent
 
-3. Configure your settings in `config.yaml`.
+## Disclaimer
 
-4. Run the main script:
-   ```sh
-   python src/main.py
-   ```
+**Important:** Constructo is an experimental project intended for educational and professional use in authorized environments only. The developers are not responsible for any damages or misuse of this software. By using this software, you agree to the following:
 
-## Development Progress
+1. Use only in environments where you have explicit permission
+2. Avoid running as root user unless absolutely necessary
+3. Keep `require_confirmation` enabled for critical operations
+4. Understand that this is experimental software and may contain bugs
+5. Use at your own risk
+
+## Known Issues
+
+- **Rate Limiting During Deep Reasoning:** When rate limiting is triggered during deep reasoning analysis, it may cause errors or infinite loops. Workaround: Increase rate limit thresholds or reduce analysis complexity.
+- **Command Output Handling:** Some commands may not have their output properly captured. Workaround: Use explicit output redirection.
+- **Concurrency Issues:** Multiple simultaneous operations may cause unexpected behavior. Workaround: Avoid running multiple instances.
+
+## Development Status
+
+**Warning:** This project is still in active development and may contain bugs or incomplete features. It is not recommended for production use. Key considerations:
+
+- Always use in controlled environments
+- Keep `require_confirmation` enabled
+- Avoid running as root user
+- Monitor system behavior closely
+- Report any issues encountered
 
 ### Completed Features
 - [x] Basic chat functionality
@@ -91,11 +109,11 @@ api:
 - [x] Log analysis and decision making
 - [x] Request confirmation for critical actions
 - [x] Rate limiting and retry logic for API calls
+- [x] Deep reasoning module
 
 ### Upcoming Features
 - [ ] Support for interactive tools (e.g., msfconsole, sqlmap)
 - [ ] Persistent memory and learning system
-- [ ] Deep reasoning module
 - [ ] Support for additional AI APIs
 - [ ] Access to internet search
 

@@ -1,26 +1,19 @@
 from typing import List, Dict
 
-PERSPECTIVE_ANALYSIS_PROMPT = """Analyze the following pentesting situation from a {perspective} perspective:
+PERSPECTIVE_ANALYSIS_PROMPT = """Analyze this pentesting situation from a {perspective} perspective:
 
 Situation: {situation}
 Context: {context}
 
-Think through the following aspects:
-1. What is the current situation telling us?
-2. What potential risks should we be concerned about?
-3. What opportunities can we identify?
-4. What actions would be most effective?
-5. How does the historical context influence our analysis?
+Consider:
+1. Key risks and immediate concerns
+2. Most promising opportunities
+3. Most effective actions
+4. Critical context implications
+5. Priority recommendations
 
-Express your thoughts naturally, as if you're thinking out loud. Consider both immediate and long-term implications.
-
-Important:
-1. Stay focused on actionable insights
-2. Be specific and avoid assumptions
-3. Consider all angles of the situation
-4. Think through consequences
-5. Prioritize based on impact and feasibility
-"""
+Be concise and focus on the most important points. Limit your response to 14 lines.
+Express your thoughts naturally, but be direct and specific."""
 
 SYNTHESIS_PROMPT = """Let's synthesize these different perspectives into a unified analysis:
 

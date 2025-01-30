@@ -28,26 +28,24 @@ class LinuxInteraction:
                 text=True,
                 shell=True,
                 preexec_fn=os.setsid,
-                bufsize=1,  # Line buffered
-                universal_newlines=True,  # Garante texto em vez de bytes
-                env=os.environ.copy()  # Usa o ambiente atual
+                env=os.environ.copy()
             )
             
-            # Capturar toda a saída
+            # Capture output and wait for completion
             stdout, stderr = process.communicate()
             return_code = process.returncode
             
-            # Se houver redirecionamento
+            # If there's redirection
             if output_file:
                 try:
-                    # Garantir que o diretório pai existe
+                    # Ensure parent directory exists
                     output_dir = os.path.dirname(output_file)
                     if output_dir and not os.path.exists(output_dir):
                         os.makedirs(output_dir, mode=0o777)
                     elif output_dir:
                         os.chmod(output_dir, 0o777)
                     
-                    # Escrever o arquivo
+                    # Write to file
                     with open(output_file, 'w') as f:
                         f.write(stdout)
                     os.chmod(output_file, 0o666)
@@ -56,12 +54,11 @@ class LinuxInteraction:
                 except Exception as e:
                     return "", f"Error writing to file: {str(e)}", 1
             
-            # Se não houver stderr, consideramos que o comando foi bem sucedido
-            if not stderr:
-                return stdout if stdout.strip() else "Command executed successfully", "", return_code
-            
-            # Se houver stderr, retornamos como erro
-            return "", stderr, return_code
+            # Return command output
+            if stdout or not stderr: 
+                return stdout, stderr, return_code
+            else:
+                return "", stderr, return_code
             
         except Exception as e:
             return "", f"Error executing command: {str(e)}", 1

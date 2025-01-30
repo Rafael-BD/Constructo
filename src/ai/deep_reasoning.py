@@ -24,10 +24,8 @@ class DeepReasoning:
         self.model = genai.GenerativeModel(
             self.agent.config.get('model', {}).get('name', 'gemini-2.0-flash-exp')
         )
-        # Use agent's rate limiter
         self.rate_limiter = self.agent.rate_limiter
         
-        # Check if prompts were imported correctly
         if not PERSPECTIVE_ANALYSIS_PROMPT or not SYNTHESIS_PROMPT:
             raise ValueError("Deep Reasoning prompts not properly imported")
             
@@ -38,29 +36,24 @@ class DeepReasoning:
         2. Explicit request from main agent
         3. Configured triggers from config.yaml
         """
-        # First check debug mode
+
         if self.config.get('debug_mode', False):
             self.agent.terminal.log("Activating Deep Reasoning - Debug mode enabled", "DEBUG")
             return True
         
-        # Then check if agent explicitly requested
         if situation_data.get("requires_deep_reasoning", False):
             return True
         
-        # Then check configured triggers
         triggers = self.activation_triggers
         
-        # Check consecutive failures
         if self.consecutive_failures >= triggers.get('consecutive_failures', 2):
             return True
         
-        # Check risk level from next_step
         if (triggers.get('high_risk_commands', True) and 
             situation_data.get("next_step", {}).get("risk", "low") == "high"):
             self.agent.terminal.log("Activating Deep Reasoning - High risk command detected", "INFO")
             return True
         
-        # Check complexity from reasoning_context
         reasoning_context = situation_data.get('reasoning_context', {})
         if (reasoning_context.get('complexity', 'low') == 'high' or
             reasoning_context.get('impact_scope', 'low') == 'high'):
