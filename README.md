@@ -16,7 +16,7 @@ Constructo is an AI-powered pentesting and security agent designed to assist wit
 
 ## Use Cases
 
-Constructo can be effectively used in various security and automation scenarios, including:
+Constructo can be used in various security and automation scenarios, including:
 
 ### Security Analysis
 - Basic security assessments and vulnerability scanning
@@ -98,7 +98,7 @@ api:
 ### 1. Clone the latest release
 ```bash
 git clone --branch latest https://github.com/Rafael-BD/Constructo.git
-cd constructo
+cd Constructo
 ```
 
 ### 2. Install dependencies
