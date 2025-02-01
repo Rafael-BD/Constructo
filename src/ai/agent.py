@@ -11,7 +11,7 @@ from prompts.main_context_prompt import SYSTEM_PROMPT, get_system_prompt
 from ai.context_manager import ContextManager
 from ai.rate_limiter import RateLimiter
 from ai.deep_reasoning import DeepReasoning
-from typing import Dict
+from typing import Dict, Optional, Callable
 
 def _extract_json(text: str) -> str:
     """Extract JSON from text, handling various formats"""
@@ -70,6 +70,9 @@ class AIAgent:
         
         self.deep_reasoning = DeepReasoning(self)
         self.system_prompt = get_system_prompt(config)
+        
+        self.current_task: Optional[asyncio.Task] = None
+        self.terminal.set_interrupt_handler(self.handle_interrupt)
         
     def _initialize_chat(self):
         genai.configure(api_key=self.config['api_key'])
@@ -138,8 +141,18 @@ class AIAgent:
                 
         raise last_error or Exception("Maximum retry attempts reached")
         
+    def handle_interrupt(self):
+        """Handler for command interruption"""
+        if self.current_task and not self.current_task.done():
+            self.current_task.cancel()
+        if hasattr(self.linux, 'current_process'):
+            self.linux.interrupt_current_process()
+            
     async def process_command(self, user_input: str):
         try:
+            # Store current task
+            self.current_task = asyncio.current_task()
+            
             # Temp
             if hasattr(self, '_current_command') and self._current_command == user_input:
                 return "Command already being processed. Please wait."
@@ -345,10 +358,15 @@ class AIAgent:
             final_result = await process_response(response_text)
             return final_result.strip() if final_result else ""
 
+        except asyncio.CancelledError:
+            self.terminal.log("Command execution cancelled", "WARNING")
+            return "Command cancelled by user"
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             self.terminal.log(error_msg, "ERROR")
             return error_msg
+        finally:
+            self.current_task = None
 
     def _temp_configure_model(self, config: Dict) -> Dict:
         """

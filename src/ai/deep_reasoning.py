@@ -163,7 +163,6 @@ class DeepReasoning:
                     "next_step": None
                 }
             
-            # Tyyntyeshisining gvvilableilable pers
             try:
                 self.agent.terminal.log_deep_reasoning_step("Synthesizing perspectives...")
                 

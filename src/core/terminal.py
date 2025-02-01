@@ -12,6 +12,8 @@ import json
 import os
 from pathlib import Path
 from rich.layout import Layout
+import signal
+import sys
 
 class UnifiedTerminal:
     def __init__(self, log_file="logs/agent_history.log"):
@@ -40,6 +42,42 @@ class UnifiedTerminal:
             "DEEP_REASONING": "bold blue",
             "DIM": "dim"
         }
+        
+        self.interrupt_handler = None
+        self.interrupt_count = 0
+        self.last_interrupt_time = 0
+        self.setup_interrupt_handler()
+        
+    def setup_interrupt_handler(self):
+        """Configure custom SIGINT (Ctrl+C) handler"""
+        signal.signal(signal.SIGINT, self._signal_handler)
+        
+    def _signal_handler(self, signum, frame):
+        """
+        Internal signal handler that manages Ctrl+C behavior:
+        - Single press: Interrupt current action
+        - Double press within 1 second: Exit program
+        """
+        current_time = time.time()
+        if current_time - self.last_interrupt_time <= 1:
+            # Double Ctrl+C within 1 second - exit program
+            self.log("\nExiting program...", "WARNING")
+            sys.exit(0)
+        else:
+            # Single Ctrl+C - interrupt current action
+            self.interrupt_count = 1
+            self.last_interrupt_time = current_time
+            if self.interrupt_handler:
+                self.interrupt_handler()
+            self.log("\nAction interrupted by user (Ctrl+C)", "WARNING")
+        
+    def set_interrupt_handler(self, handler):
+        """Set the callback for when interruption occurs"""
+        self.interrupt_handler = handler
+        
+    def clear_interrupt_handler(self):
+        """Remove the current interrupt handler"""
+        self.interrupt_handler = None
         
     def start_processing(self, message="Thinking...", style="THINKING"):
         """Shows a spinner while processing"""

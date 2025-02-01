@@ -84,7 +84,7 @@ async def main():
     console.print("[dim]- Use Ctrl+A/E to move to start/end of line[/dim]")
     console.print("[dim]- Use Ctrl+R to search command history[/dim]")
     console.print("[dim]- Use Up/Down arrows to navigate history[/dim]")
-    
+    console.print("[dim]- Use Ctrl+C to stop the agent action[/dim]")
     while True:
         try:
             user_input = await session.prompt_async(
